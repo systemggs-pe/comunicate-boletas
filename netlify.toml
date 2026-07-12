@@ -1,0 +1,35 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "FIREBASE_API_KEY"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/boletas"
+  to = "/.netlify/functions/boletas"
+  status = 200
+
+[[redirects]]
+  from = "/api/publicBoleta"
+  to = "/.netlify/functions/publicBoleta"
+  status = 200
+
+[[redirects]]
+  from = "/api/reniec"
+  to = "/.netlify/functions/reniec"
+  status = 200
+
+[[redirects]]
+  from = "/api/analizarCajaGemini"
+  to = "/.netlify/functions/analizarCajaGemini"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
