@@ -258,6 +258,20 @@ test('the sales UI exposes the sale-receipt action and local development has an 
   assert.match(viteConfig, /comunicate-registros-v2\.netlify\.app/);
 });
 
+test('mobile layout keeps touch controls usable and prevents horizontal overflow regressions', async () => {
+  const [frontend, styles] = await Promise.all([
+    readFile(`${ROOT}/src/features/boletas/BoletaExtranjera.jsx`, 'utf8'),
+    readFile(`${ROOT}/src/index.css`, 'utf8'),
+  ]);
+
+  assert.match(frontend, /className="boleta-form-actions/);
+  assert.match(frontend, /className="sale-summary/);
+  assert.match(styles, /\.boleta-workspace, \.saas-form-shell \{ overflow: visible; \}/);
+  assert.match(styles, /font-size: 1rem;/);
+  assert.match(styles, /@media \(max-width: 350px\)/);
+  assert.doesNotMatch(styles, /\.boleta-workspace \.flex\.justify-between\.pt-2\.border-t/);
+});
+
 test('two concurrent saves for the same IMEI produce exactly one boleta', async () => {
   const imei = '123456789012345';
   const db = new FakeDb();

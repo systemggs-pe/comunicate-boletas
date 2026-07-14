@@ -15,7 +15,7 @@ export function LoginScreen({auth, allowedEmails, showToast}) {
         showToast('Este correo no esta autorizado', 'error');
       }
     } catch (error) {
-      if (error.code !== 'auth/popup-closed-by-user') showToast('No se pudo iniciar sesion', 'error');
+      if (error.code !== 'auth/popup-closed-by-user') showToast('No se pudo iniciar sesión', 'error');
     } finally {
       setLoading(false);
     }
@@ -32,7 +32,7 @@ export function LoginScreen({auth, allowedEmails, showToast}) {
         <h1 id="login-title">BOLETA DE VENTA</h1>
         <p className="login-copy">Emite, consulta y verifica boletas de venta desde un espacio seguro.</p>
         <button type="button" className="saas-primary login-button" onClick={login} disabled={loading}>
-          <LogIn size={18}/> {loading ? 'Ingresando...' : 'Continuar con Google'}
+          <LogIn size={18}/> {loading ? 'Ingresando…' : 'Continuar con Google'}
         </button>
         <div className="login-security"><ShieldCheck size={16}/> Acceso exclusivo para personal autorizado</div>
       </section>

@@ -2,6 +2,14 @@ import React from 'react';
 import {ScanBarcode, X} from '../../components/Icons.jsx';
 import {llamarFuncionSegura} from '../../services/functionsClient.js';
 import {normalizarEscaneo} from '../../utils/scanner.js';
+import {AccessibleDialog} from '../../components/AccessibleDialog.jsx';
+
+const cameraErrorMessage = error => {
+  if (error?.name === 'NotAllowedError') return 'Permiso de cámara bloqueado. Actívalo en la configuración del navegador e inténtalo nuevamente.';
+  if (error?.name === 'NotFoundError') return 'No se encontró una cámara disponible en este dispositivo.';
+  if (error?.name === 'NotReadableError') return 'La cámara está siendo utilizada por otra aplicación.';
+  return error?.message || 'No se pudo abrir la cámara. Verifica los permisos e inténtalo nuevamente.';
+};
 
 export function EscanerIA({onResult, onClose, onProcessingStart, onError}) {
   const videoRef = React.useRef(null);
@@ -14,7 +22,7 @@ export function EscanerIA({onResult, onClose, onProcessingStart, onError}) {
 
   const abrirCamara = React.useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error('La camara solo funciona en HTTPS, localhost o navegadores compatibles.');
+      throw new Error('La cámara solo funciona en HTTPS, localhost o navegadores compatibles.');
     }
     return navigator.mediaDevices.getUserMedia({
       video: {facingMode: 'environment', width: {ideal: 3840}, height: {ideal: 2160}},
@@ -35,7 +43,7 @@ export function EscanerIA({onResult, onClose, onProcessingStart, onError}) {
           videoRef.current.play();
         }
       })
-      .catch(() => setError('Sin acceso a camara. Verifica permisos.'));
+      .catch(cameraError => setError(cameraErrorMessage(cameraError)));
 
     return () => {
       activo = false;
@@ -68,7 +76,7 @@ export function EscanerIA({onResult, onClose, onProcessingStart, onError}) {
 
     const imageBase64 = fotoBase64;
     setFase('procesando');
-    setMsg('Extrayendo datos...');
+    setMsg('Extrayendo datos…');
     setError('');
     onProcessingStart?.();
     onClose?.();
@@ -86,7 +94,7 @@ export function EscanerIA({onResult, onClose, onProcessingStart, onError}) {
 
       const texto = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
       if (!texto) {
-        onError?.('Gemini no devolvio texto. Reintenta.');
+        onError?.('El escáner no devolvió texto. Toma otra foto e inténtalo nuevamente.');
         return;
       }
 
@@ -126,7 +134,7 @@ export function EscanerIA({onResult, onClose, onProcessingStart, onError}) {
       const mensaje = e.message === 'BACKEND_NOT_DEPLOYED'
         ? 'Backend no desplegado: abre la app desde el servidor Node'
         : e.message === 'BACKEND_INVALID_RESPONSE'
-          ? 'Respuesta invalida de Netlify Functions'
+          ? 'Respuesta inválida de Netlify Functions'
           : e.message;
       onError?.(`Error: ${mensaje}`);
     }
@@ -145,55 +153,62 @@ export function EscanerIA({onResult, onClose, onProcessingStart, onError}) {
           videoRef.current.play();
         }
       })
-      .catch(e => setError(e.message || 'Sin acceso a camara. Verifica permisos.'));
+      .catch(e => setError(cameraErrorMessage(e)));
   };
 
   return (
-    <div className="fixed inset-0 z-[260] bg-slate-950" role="dialog" aria-modal="true" aria-label="Escanear caja del equipo">
-      <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between border-b border-white/10 bg-slate-950/95 px-4 py-3 text-white">
+    <AccessibleDialog
+      title="Escanear caja del equipo"
+      onClose={onClose}
+      closeOnBackdrop={false}
+      backdropClassName="scanner-dialog"
+      panelClassName="scanner-surface"
+    >
+      <div className="scanner-header absolute inset-x-0 top-0 z-10 flex items-center justify-between border-b border-white/10 bg-slate-950/95 px-4 py-3 text-white">
         <div className="min-w-0">
-          <p className="flex items-center gap-2 text-sm font-bold">
+          <p className="flex items-center gap-2 text-sm font-bold" aria-hidden="true">
             <ScanBarcode size={17} />
-            Escanear caja del equipo
+            Escáner de caja
           </p>
-          <p className="mt-0.5 text-xs font-medium text-slate-300">
-            {fase === 'camara' && 'Apunta la camara a la etiqueta con IMEI y datos del equipo'}
+          <p className="mt-0.5 text-xs font-medium text-slate-300" role="status" aria-live="polite">
+            {fase === 'camara' && 'Apunta la cámara a la etiqueta con IMEI y datos del equipo'}
             {fase === 'preview' && 'Revisa la foto antes de extraer los datos'}
-            {fase === 'procesando' && (msg || 'Extrayendo datos...')}
+            {fase === 'procesando' && (msg || 'Extrayendo datos…')}
           </p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
-          aria-label="Cerrar escaner"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-white/10 hover:text-white"
+          aria-label="Cerrar escáner"
+          data-dialog-autofocus
         >
           <X size={20} />
         </button>
       </div>
 
-      <div className="relative flex h-full w-full items-center justify-center bg-black pb-[5.4rem] pt-[4.6rem]">
+      <div className="scanner-content relative flex h-full w-full items-center justify-center bg-black">
         {fase === 'camara' && (
           <video ref={videoRef} muted playsInline className="h-full w-full object-contain" />
         )}
         {(fase === 'preview' || fase === 'procesando') && fotoBase64 && (
-          <img src={`data:image/jpeg;base64,${fotoBase64}`} alt="preview" className="h-full w-full object-contain" />
+          <img src={`data:image/jpeg;base64,${fotoBase64}`} alt="Vista previa de la caja capturada" className="h-full w-full object-contain" />
         )}
         {fase === 'procesando' && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-            <div className="flex items-center gap-2 rounded-lg bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white">
+            <div className="flex items-center gap-2 rounded-lg bg-slate-950/80 px-4 py-3 text-sm font-semibold text-white" role="status" aria-live="polite">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-              Extrayendo datos...
+              Extrayendo datos…
             </div>
           </div>
         )}
         <canvas ref={canvasRef} className="hidden" />
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 z-10 border-t border-white/10 bg-slate-950/95 px-4 py-3">
+      <div className="scanner-actions absolute inset-x-0 bottom-0 z-10 border-t border-white/10 bg-slate-950/95 px-4 py-3">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-2">
           {error && (
-            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-center text-xs font-semibold text-red-100">
+            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-center text-xs font-semibold text-red-100" role="alert">
               {error}
             </p>
           )}
@@ -215,11 +230,11 @@ export function EscanerIA({onResult, onClose, onProcessingStart, onError}) {
           {fase === 'procesando' && !error && (
             <button type="button" disabled className="saas-primary w-full cursor-wait opacity-80">
               <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" />
-              Extrayendo datos...
+              Extrayendo datos…
             </button>
           )}
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
