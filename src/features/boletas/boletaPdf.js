@@ -43,10 +43,10 @@ export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, tot
   const verificationUrl = getBoletaVerificationUrl();
   const mmW = 48;
   const FONT = 'courier';
-  // Courier es ancho â€” sin escala, tamaÃ±os pequeÃ±os para que quepan en 48mm
+  // Courier es ancho, sin escala y con tamaños pequeños para que quepan en 48 mm.
   const F = 1.0;
 
-  // CÃ³digo de barras: S/N del primer equipo o IMEI
+  // Código de barras: S/N del primer equipo o IMEI.
   const primerEq = equiposMap[ventas[0]?.imeiEquipo] || {};
   const codigoBarras = primerEq.sn || ventas[0]?.imeiEquipo || '';
   let barcodeImg = null, barcodeH = 0;
@@ -59,7 +59,7 @@ export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, tot
     } catch (_) {}
   }
 
-  // NÃºmero de boleta auto (timestamp)
+  // Número de boleta automático (timestamp).
   const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now()).slice(-4).padStart(4, '0');
 
   const renderPDF = (doc, dibujar) => {
@@ -113,16 +113,16 @@ export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, tot
     const fechaStr = `${pad(fecha.getDate())}/${pad(fecha.getMonth()+1)}/${fecha.getFullYear().toString().slice(2)}`;
     const horaStr  = `${pad(fecha.getHours())}:${pad(fecha.getMinutes())}:${pad(fecha.getSeconds())}`;
 
-    // â”€â”€ CABECERA (centrada, bold) â”€â”€
+    // Cabecera centrada.
     y += 1;
     tc(`R.U.T.  ${emisorInfo.rut}`, 7, true);
-    tc(`BOLETA ELECTRONICA NÂ°  ${nBoleta}`, 7, true);
+    tc(`BOLETA ELECTRONICA NRO  ${nBoleta}`, 7, true);
     tc('SII ARICA', 7, true);
     y += 1;
     sep();
     y += 1;
 
-    // â”€â”€ TIENDA (izquierda) â”€â”€
+    // Datos de tienda.
     lineas(emisorInfo.nombre).forEach(linea => tl(linea, 6.5));
     tl('VENTA CELULARES ACCESORIOS', 6.5);
     lineas(emisorInfo.direccion).forEach(linea => tl(linea, 6.5));
@@ -130,7 +130,7 @@ export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, tot
     sep();
     y += 2;
 
-    // â”€â”€ CLIENTE + EQUIPOS (izquierda, sin separador entre cliente y equipo) â”€â”€
+    // Cliente y equipos.
     if (cliente.nombre) fila('NOMBRE', cliente.nombre.toUpperCase(), 6.5);
     if (cliente.dni)    fila('RUT',    cliente.dni, 6.5);
     y += 1;
@@ -139,7 +139,7 @@ export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, tot
       const eq  = equiposMap[v.imeiEquipo] || {};
       const mem = eq.memoria || v.memoria || '';
       const nom = eq.nombreComercial || v.nombreComercial || v.modeloEquipo || '';
-      // "IPHONE 11 128GB" â€” sin etiqueta
+      // Nombre comercial y memoria, sin etiqueta.
       tl(`${nom}${mem ? ' ' + mem + 'GB' : ''}`.trim(), 6.5);
       const color = eq.color || v.color || '';
       if (color) fila('COLOR', color, 6.5);
@@ -163,7 +163,7 @@ export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, tot
     sep();
     y += 2;
 
-    // â”€â”€ CÃ“DIGO DE BARRAS (centrado) â”€â”€
+    // Código de barras centrado.
     if (barcodeImg) {
       if (dibujar) doc.addImage(barcodeImg, 'PNG', 3, y, mmW - 6, barcodeH);
       y += barcodeH + 2;
@@ -171,7 +171,7 @@ export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, tot
     sep();
     y += 1;
 
-    // â”€â”€ FECHA / HORA â”€â”€
+    // Fecha y hora.
     if (dibujar) {
       doc.setFontSize(6.5 * F); doc.setFont(FONT, 'normal');
       doc.text('FECHA', M, y);
@@ -185,7 +185,7 @@ export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, tot
     }
     y += lh(6.5) + 2;
 
-    // â”€â”€ PIE (mixtas, centrado) â”€â”€
+    // Pie centrado.
     tc('********************************', 5.5);
     tc('Esta boleta es indispensable', 6.5);
     tc('para', 6.5);
@@ -217,7 +217,7 @@ export async function generarBoletaExtranjera2({ cliente, ventas, equiposMap, to
   const mmW  = 80;
   const M    = 5;
   const FONT = 'courier';
-  const FS   = 9; // â† tamaÃ±o de fuente de la boleta 2, cÃ¡mbialo aquÃ­
+  const FS   = 9; // Tamaño base de la boleta 2.
   const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now()).slice(-4).padStart(4, '0');
 
   // Totales
@@ -239,7 +239,7 @@ export async function generarBoletaExtranjera2({ cliente, ventas, equiposMap, to
   const imei1   = pV.imeiEquipo || '';
   const imei2   = pEq.imei2 || pV.imei2Equipo || '';
 
-  // PDF417 real â€” obligatorio
+  // PDF417 real obligatorio.
   const pdf417W = mmW - M * 2;
   const texto417 = [
     nBoleta, cliente.dni || '', cliente.nombre || '',
@@ -284,11 +284,11 @@ export async function generarBoletaExtranjera2({ cliente, ventas, equiposMap, to
     tl('COS.', FS);
     lineas(emisorInfo.direccion).forEach(linea => tl(linea, FS));
     nl(2);
-    tl(`BOLETA ELECTRÃ“NICA NUMERO: ${nBoleta}`, FS);
+    tl(`BOLETA ELECTRONICA NUMERO: ${nBoleta}`, FS);
     tl(`REF. VENDEDOR: ${rutVendedor(emisorInfo.rut)}`, FS);
     tl(`Fecha: ${fechaStr}`, FS);
     nl(2);
-    tl('DirecciÃ³n: Santiago', FS);
+    tl('Direccion: Santiago', FS);
     nl(3);
     tl('Venta', FS);
     nl(2);
@@ -311,7 +311,7 @@ export async function generarBoletaExtranjera2({ cliente, ventas, equiposMap, to
       y += pdf417H;
     }
     nl(3);
-    tl('Timbre ElectrÃ³nico SII', FS);
+    tl('Timbre Electronico SII', FS);
     tl('Res. 99 de 2014', FS);
     tl('Verifique documento en sii.cl', FS);
     nl(2);
@@ -339,7 +339,7 @@ export async function generarBoletaExtranjera3({ cliente, ventas, equiposMap, to
   const mmW = 80;
   const M = 5;
   const FONT = 'helvetica';
-  const FS = 9; // mismo tamano base que la boleta extranjera #2
+  const FS = 9; // mismo tamano base que el formato 2
   const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now()).slice(-4).padStart(4, '0');
   const emisorDefaults = getBoletaExtranjeraEmisor({}, 3);
   const emisor = {
@@ -637,4 +637,166 @@ export async function generarBoletaExtranjera3({ cliente, ventas, equiposMap, to
 
   const nombre3 = `BOLETA3-${nBoleta}.pdf`;
   return entregarPdf(docFinal, nombre3, output);
+}
+
+export async function generarBoletaExtranjera4({cliente, ventas, equiposMap, totalClp, fechaHora, nBoleta: numeroBoleta, emisor: emisorConfig, output = 'download'}) {
+  const {jsPDF} = getPdfTools();
+  const emisor = {...getBoletaExtranjeraEmisor({}, 4), ...(emisorConfig || {})};
+  const doc = new jsPDF({unit: 'mm', format: 'letter', orientation: 'portrait'});
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 18;
+  const right = pageW - margin;
+  const contentW = pageW - margin * 2;
+  const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now()).slice(-7).padStart(7, '0');
+  const fecha = fechaHora ? new Date(fechaHora) : new Date();
+  const pad = value => String(value).padStart(2, '0');
+  const fechaTexto = `${pad(fecha.getMonth() + 1)}/${pad(fecha.getDate())}/${fecha.getFullYear()}`;
+  const taxPercent = Math.min(100, Math.max(0, Number(emisor.impuestoPorcentaje || 0)));
+  const total = Math.max(0, Number(totalClp || 0));
+  const subtotal = taxPercent > 0 ? Math.round(total / (1 + taxPercent / 100)) : total;
+  const tax = total - subtotal;
+  const money = value => `$${Number(value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+  const ventasBoleta = Array.isArray(ventas) ? ventas : [];
+  const sourceTotal = ventasBoleta.reduce((sum, venta) => sum + penToClp(parseFloat(venta.precio || 0)), 0) || 1;
+  const companyLines = [emisor.nombre, emisor.direccion, emisor.ciudad, emisor.pais, emisor.email, emisor.telefono, emisor.sitioWeb].filter(Boolean);
+
+  const text = (value, x, y, size = 8, options = {}) => {
+    doc.setFont('helvetica', options.bold ? 'bold' : 'normal');
+    doc.setFontSize(size);
+    doc.setTextColor(options.color ?? 48);
+    doc.text(String(value ?? ''), x, y, options.align ? {align: options.align} : undefined);
+  };
+
+  if (emisor.logoDataUrl) {
+    try {
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = emisor.logoDataUrl;
+      });
+      const maxW = 46;
+      const maxH = 20;
+      const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
+      const width = img.naturalWidth * scale;
+      const height = img.naturalHeight * scale;
+      const format = /^data:image\/png/i.test(emisor.logoDataUrl) ? 'PNG' : 'JPEG';
+      doc.addImage(emisor.logoDataUrl, format, margin, 14, width, height);
+    } catch (error) {
+      console.warn('No se pudo insertar el logo en la boleta 4:', error);
+    }
+  }
+
+  let companyY = emisor.logoDataUrl ? 38 : 23;
+  companyLines.forEach((line, index) => {
+    text(line, margin, companyY, index === 0 ? 8.4 : 7.2, {bold: index === 0, color: index === 0 ? 40 : 82});
+    companyY += index === 0 ? 4.2 : 3.3;
+  });
+
+  text(`INVOICE # :   ${nBoleta}`, right, 25, 11.5, {bold: true, align: 'right'});
+  const meta = [
+    ['Date', fechaTexto],
+    ['Payment Terms', emisor.metodoPago || 'Paid'],
+    ['Due Date', fechaTexto],
+    ['Balance due', money(0)],
+  ];
+  meta.forEach(([label, value], index) => {
+    const y = 34 + index * 4.2;
+    text(`${label}:`, right - 34, y, 7.2, {bold: true, align: 'right', color: 70});
+    text(value, right, y, 7.2, {align: 'right', color: 70});
+  });
+
+  let y = Math.max(companyY + 6, 62);
+  const drawTableHeader = () => {
+    doc.setFillColor(62, 62, 62);
+    doc.rect(margin, y, contentW, 8, 'F');
+    text('DESCRIPTION', margin + 4, y + 5.3, 7.5, {bold: true, color: 248});
+    text('QTY', right - 50, y + 5.3, 7.5, {bold: true, align: 'center', color: 248});
+    text('AMOUNT', right - 3, y + 5.3, 7.5, {bold: true, align: 'right', color: 248});
+    y += 13;
+  };
+  drawTableHeader();
+
+  ventasBoleta.forEach((venta, index) => {
+    if (y > pageH - 82) {
+      doc.addPage('letter', 'portrait');
+      y = 18;
+      drawTableHeader();
+    }
+    const equipo = equiposMap?.[venta.imeiEquipo] || {};
+    const product = [
+      venta.marcaEquipo || equipo.marca,
+      equipo.nombreComercial || venta.nombreComercial || venta.modeloEquipo || equipo.modelo,
+      venta.memoria || equipo.memoria,
+      venta.color || equipo.color,
+    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim() || 'EQUIPO';
+    const sourceAmount = penToClp(parseFloat(venta.precio || 0));
+    const itemAmount = index === ventasBoleta.length - 1
+      ? subtotal - ventasBoleta.slice(0, index).reduce((sum, item) => sum + Math.round(subtotal * penToClp(parseFloat(item.precio || 0)) / sourceTotal), 0)
+      : Math.round(subtotal * sourceAmount / sourceTotal);
+    const details = [
+      ['Model Number', venta.modeloEquipo || equipo.modelo],
+      ['Serial Number', venta.sn || equipo.sn],
+      ['IMEI1', venta.imeiEquipo],
+      ['IMEI2', equipo.imei2 || venta.imei2Equipo],
+    ].filter(([, value]) => value);
+    text(product, margin + 2, y, 8.5, {bold: true});
+    text('1', right - 50, y, 8.5, {align: 'center'});
+    text(money(itemAmount), right - 2, y, 8.5, {align: 'right'});
+    y += 5;
+    details.forEach(([label, value]) => {
+      text(`${label}:`, margin + 2, y, 7.2, {bold: true, color: 78});
+      text(value, margin + 30, y, 7.2, {color: 78});
+      y += 4;
+    });
+    y += 4;
+    doc.setDrawColor(225);
+    doc.setLineWidth(0.2);
+    doc.line(margin, y, right, y);
+    y += 5;
+  });
+
+  y = Math.max(y + 15, 190);
+  if (y > pageH - 66) {
+    doc.addPage('letter', 'portrait');
+    y = 32;
+  }
+  doc.setDrawColor(70);
+  doc.setLineWidth(0.35);
+  doc.line(margin, y, right, y);
+  y += 9;
+  const totalsX = right - 46;
+  const valueX = right;
+  [['Subtotal', subtotal], [`Tax ${taxPercent}%`, tax]].forEach(([label, value]) => {
+    text(`${label}:`, totalsX, y, 8, {align: 'right', color: 75});
+    text(money(value), valueX, y, 8, {align: 'right'});
+    y += 6;
+  });
+  text('Total:', totalsX, y, 8.5, {bold: true, align: 'right'});
+  text(money(total), valueX, y, 8.5, {bold: true, align: 'right'});
+  y += 12;
+  text('Amount Paid:', totalsX, y, 8.5, {align: 'right', color: 70});
+  text(money(total), valueX, y, 8.5, {align: 'right'});
+  y += 9;
+  doc.line(margin, y, right, y);
+  y += 9;
+  text('Notes:', margin, y, 7.8, {color: 70});
+  y += 4.3;
+  const noteLines = doc.splitTextToSize(emisor.notas || 'Please include your reference number.', contentW * 0.72);
+  noteLines.forEach(line => {
+    text(line, margin, y, 7.4, {color: 75});
+    y += 3.7;
+  });
+  text(`Reference: ${nBoleta}`, margin, y + 1, 7.5, {bold: true});
+  y += 7;
+  doc.line(margin, y, right, y);
+  y += 9;
+  text(`Terms: ${fecha.getFullYear()} ${emisor.nombre || 'Company'}. ${emisor.terminos || ''}`, margin, y, 7.2, {color: 82});
+
+  const verificationUrl = getBoletaVerificationUrl();
+  text(emisor.sitioWeb || verificationUrl, margin, pageH - 13, 7, {color: 68});
+  text('Documento generado por COMUNIC@TE', right, pageH - 13, 6.8, {align: 'right', color: 110});
+
+  return entregarPdf(doc, `BOLETA4-${nBoleta}.pdf`, output);
 }

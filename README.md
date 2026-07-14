@@ -1,13 +1,13 @@
-# COMUNIC@TE Boletas Extranjeras
+# COMUNIC@TE BOLETA DE VENTA
 
-Aplicacion independiente para emitir, consultar y verificar boletas extranjeras usando el mismo proyecto Firebase de COMUNIC@TE.
+Aplicacion independiente para emitir, consultar y verificar boletas de venta usando el mismo proyecto Firebase de COMUNIC@TE.
 
 ## Desarrollo
 
 1. Crear `.env` a partir de `.env.example`.
 2. Completar las variables `VITE_FIREBASE_*` con la configuracion de la aplicacion web de Firebase.
-3. Completar `FIREBASE_API_KEY` y `FIREBASE_SERVICE_ACCOUNT` para las funciones Netlify.
-4. Ejecutar `npm run dev:netlify` para probar frontend y funciones juntos.
+3. Para probar el frontend con los datos reales, configurar `VITE_BACKEND_BASE_URL=https://comunicate-boletas.netlify.app` y ejecutar `npm run dev`. La aplicacion abre en `http://localhost:5174`; si la funcion publicada aun no encuentra el DNI, Vite consulta automaticamente el backend operativo de Ventas mediante su proxy local.
+4. Solo si necesitas ejecutar tambien las funciones localmente, completa `FIREBASE_API_KEY` y un `FIREBASE_SERVICE_ACCOUNT` valido del proyecto `comunicate-tacna`, en una sola linea JSON, y ejecuta `npm run dev:netlify`.
 
 ## Netlify
 
@@ -23,6 +23,7 @@ Crear un sitio separado con base directory apuntando a esta carpeta y configurar
 - `VITE_BOLETA_PUBLIC_URL`, por ejemplo `https://comunicate-boletas-extranjeras.netlify.app/boleta`
 - `FIREBASE_API_KEY`
 - `FIREBASE_SERVICE_ACCOUNT`
+- `OPERATIONAL_CLIENTS_URL`, por defecto `https://comunicate-registros-v2.netlify.app/api/clientes`; se usa como respaldo para hallar ventas reales por DNI
 - `ALLOWED_EMAILS`
 - `ALLOWED_ORIGINS`
 - `RENIEC_TOKEN`

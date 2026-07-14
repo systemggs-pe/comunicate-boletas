@@ -186,6 +186,76 @@ test('sales lookup reads only one client, matching sales, and their IMEIs', asyn
   assert.equal(result.equipos.length, 2);
   assert.equal(db.metrics.documentReads, 3);
   assert.equal(db.metrics.queryDocumentReads, 2);
+  assert.equal(db.metrics.queries.filter(query => query.path.endsWith('/ventas')).length, 1);
+});
+
+test('sales lookup supports legacy numeric DNI values without adding reads to normal lookups', async () => {
+  const dni = '12345678';
+  const imei = '123456789012345';
+  const db = new FakeDb({
+    [`${basePath}/clientes/${dni}`]: {nombre: 'CLIENTE ANTIGUO'},
+    [`${basePath}/ventas/legacy`]: {dniCliente: Number(dni), imeiEquipo: imei, fecha: '2025-12-01', precio: '150'},
+    [`${basePath}/equipos/${imei}`]: {marca: 'LEGACY'},
+  });
+
+  const result = await __test.lookupSales(db, {dni});
+
+  assert.equal(result.ventas.length, 1);
+  assert.equal(result.ventas[0].dniCliente, dni);
+  assert.equal(result.equipos.length, 1);
+  assert.equal(db.metrics.queries.filter(query => query.path.endsWith('/ventas')).length, 2);
+});
+
+test('sales lookup falls back to the operational Ventas backend when the boletas project is empty', async () => {
+  const dni = '12345678';
+  const imei = '123456789012345';
+  const db = new FakeDb();
+  let forwardedRequest = null;
+
+  const result = await __test.lookupSales(db, {dni}, {
+    authorization: 'Bearer firebase-token',
+    fetchImpl: async (url, options) => {
+      forwardedRequest = {url, options};
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          clientes: [{
+            dni,
+            nombre: 'CLIENTE OPERATIVO',
+            celular: '999999999',
+            ventas: [{id: 'venta-real', dniCliente: dni, imeiEquipo: imei, precio: '150', fecha: '2026-07-12'}],
+            equipos: [{idEquipo: imei, marca: 'XIAOMI'}],
+          }],
+        }),
+      };
+    },
+  });
+
+  assert.match(forwardedRequest.url, /comunicate-registros-v2\.netlify\.app\/api\/clientes$/);
+  assert.equal(forwardedRequest.options.headers.Authorization, 'Bearer firebase-token');
+  assert.deepEqual(JSON.parse(forwardedRequest.options.body), {
+    action: 'queryOperational',
+    searchTerm: dni,
+    searchField: 'dni',
+    limit: 1,
+  });
+  assert.equal(result.cliente.nombre, 'CLIENTE OPERATIVO');
+  assert.equal(result.ventas[0].id, 'venta-real');
+  assert.equal(result.equipos[0].idEquipo, imei);
+});
+
+test('the sales UI exposes the sale-receipt action and local development has an operational proxy', async () => {
+  const [frontend, client, viteConfig] = await Promise.all([
+    readFile(`${ROOT}/src/features/boletas/BoletaExtranjera.jsx`, 'utf8'),
+    readFile(`${ROOT}/src/services/functionsClient.js`, 'utf8'),
+    readFile(`${ROOT}/vite.config.js`, 'utf8'),
+  ]);
+
+  assert.match(frontend, /Generar boleta de venta/);
+  assert.match(frontend, /venta encontrada/);
+  assert.match(client, /operational-api\/api\/clientes/);
+  assert.match(viteConfig, /comunicate-registros-v2\.netlify\.app/);
 });
 
 test('two concurrent saves for the same IMEI produce exactly one boleta', async () => {
@@ -210,4 +280,31 @@ test('save duplicate checks are bounded and frontend contains no Firestore liste
   assert.doesNotMatch(backend, /transaction\.get\(boletasRef\)/);
   assert.match(backend, /array-contains/);
   assert.doesNotMatch(frontend, /onSnapshot|firebase\/firestore|collection\(/);
+});
+
+test('format 4 accepts expanded issuer data and a bounded image logo', () => {
+  const payload = validPayload('123456789012345');
+  payload.formato = 4;
+  payload.boletaData.emisor = {
+    nombre: 'NORTHLINE RETAIL INC.',
+    rut: 'SIMULADO',
+    direccion: '702 Market Avenue',
+    ciudad: 'Orlando, FL 32801',
+    pais: 'United States',
+    email: 'support@example.com',
+    telefono: '+1 407 555 0184',
+    sitioWeb: 'example.com',
+    impuestoPorcentaje: '5',
+    logoDataUrl: 'data:image/jpeg;base64,ZmFrZQ==',
+  };
+  const parsed = __test.normalizeBoletaPayload(payload);
+  assert.equal(parsed.formato, 4);
+  assert.equal(parsed.boletaData.emisor.ciudad, 'Orlando, FL 32801');
+  assert.equal(parsed.boletaData.emisor.logoDataUrl, '');
+});
+
+test('legacy issuer config does not create an empty format 4 override', () => {
+  const config = __test.normalizeConfig({formato1: {nombre: 'EMPRESA', rut: '1-9', direccion: 'DIRECCION'}});
+  assert.ok(config.formato1);
+  assert.equal(config.formato4, undefined);
 });

@@ -1,12 +1,12 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import {Search, Edit, Printer, AlertCircle, ScanBarcode, FileText} from 'lucide-react';
+import {Search, Edit, Printer, AlertCircle, ScanBarcode, FileText} from '../../components/Icons.jsx';
 import {buscarVentasBoleta, consultarReniecDni, guardarBoletaExtranjera, listarBoletas} from '../../services/functionsClient.js';
 import { luhn } from '../../utils/imei.js';
 import { penToClp, formatClp } from '../../utils/currency.js';
 import { toLocalDatetimeValueBoleta } from '../../utils/dates.js';
 import {getBoletaExtranjeraEmisor} from '../../config/boletaExtranjera.js';
 import { EscanerIA } from '../registros/EscanerIA.jsx';
-import { generarBoletaExtranjera, generarBoletaExtranjera2, generarBoletaExtranjera3 } from './boletaPdf.js';
+import { generarBoletaExtranjera, generarBoletaExtranjera2, generarBoletaExtranjera3, generarBoletaExtranjera4 } from './boletaPdf.js';
 const limpiarParaFirestore = data => JSON.parse(JSON.stringify(data));
 const emptyForm = { nombre: '', rut: '', imei1: '', imei2: '', sn: '', marca: '', modelo: '', nombreComercial: '', memoria: '', color: '', precio: '' };
 
@@ -204,7 +204,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
     cargarHistorial();
   }, [cargarHistorial]);
 
-  // â”€â”€ MODO BUSCAR â”€â”€
+  // Modo buscar
   const [searchDni, setSearchDni] = useState('');
   const [clienteEncontrado, setClienteEncontrado] = useState(null);
   const [ventasCliente, setVentasCliente] = useState([]);
@@ -217,6 +217,10 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
     if (!dni) { showToast('Ingresa el DNI del cliente', 'error'); return; }
 
     setBuscandoVentas(true);
+    setClienteEncontrado(null);
+    setVentasCliente([]);
+    setEquipos([]);
+    setSeleccionadas(new Set());
     try {
       const result = await buscarVentasBoleta(dni);
       const vs = Array.isArray(result.ventas) ? result.ventas : [];
@@ -303,6 +307,8 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
     imprimiendoBoletaRef.current = true;
     setImprimiendoBoleta(true);
 
+    const emisorConfigurado = getBoletaExtranjeraEmisor(boletaEmisoresConfig, formato);
+    const emisorGuardado = data.emisor || data.boletaData?.emisor || {};
     const boletaData = {
       cliente: data.cliente,
       ventas: data.ventas,
@@ -310,7 +316,11 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       totalClp: data.totalClp,
       fechaHora: data.fechaHora,
       nBoleta: data.nBoleta || data.boletaData?.nBoleta || null,
-      emisor: data.emisor || data.boletaData?.emisor || getBoletaExtranjeraEmisor(boletaEmisoresConfig, formato),
+      emisor: {
+        ...emisorConfigurado,
+        ...emisorGuardado,
+        logoDataUrl: emisorGuardado.logoDataUrl || emisorConfigurado.logoDataUrl || '',
+      },
     };
 
     try {
@@ -322,7 +332,11 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
           boletaData: limpiarParaFirestore(boletaData),
         });
         boletaData.nBoleta = saved.boleta?.nBoleta || boletaData.nBoleta;
-        boletaData.emisor = saved.boleta?.boletaData?.emisor || boletaData.emisor;
+        boletaData.emisor = {
+          ...boletaData.emisor,
+          ...(saved.boleta?.boletaData?.emisor || {}),
+          logoDataUrl: boletaData.emisor.logoDataUrl || '',
+        };
         if (saved.boleta) {
           setHistorialBoletas(current => [
             saved.boleta,
@@ -337,7 +351,8 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       setModalBoleta(null);
       if (formato === 1) await generarBoletaExtranjera(boletaData);
       else if (formato === 2) await generarBoletaExtranjera2(boletaData);
-      else await generarBoletaExtranjera3(boletaData);
+      else if (formato === 3) await generarBoletaExtranjera3(boletaData);
+      else await generarBoletaExtranjera4(boletaData);
       showToast(data.guardarHistorial ? (data.historialId ? 'Boleta actualizada e impresa' : 'Boleta guardada e impresa') : 'Boleta reimpresa', 'success');
     } catch (error) {
       console.error(error);
@@ -345,7 +360,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
         const duplicateId = error.payload?.details?.boletaId || error.payload?.boletaId || '';
         const boleta = historialBoletas.find(item => item.id === duplicateId);
         if (boleta) setBoletaExistentePrompt({boleta, draft: boletaData, opciones: {}});
-        showToast('Ese equipo ya tiene una boleta extranjera', 'error');
+        showToast('Ese equipo ya tiene una boleta de venta', 'error');
       } else {
         showToast('No se pudo guardar o imprimir la boleta', 'error');
       }
@@ -361,7 +376,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
     prepararBoleta({ cliente: clienteEncontrado, ventas: ventasSel, equiposMap, totalClp, fechaHora: fechaDesdeVentas(ventasSel) });
   };
 
-  // â”€â”€ MODO NUEVA BOLETA MANUAL â”€â”€
+  // Modo nueva boleta manual
   const [mostrarEscanerBoleta, setMostrarEscanerBoleta] = useState(false);
   const [escaneoBoletaProcesando, setEscaneoBoletaProcesando] = useState(false);
   const [form, setForm] = useState({...emptyForm});
@@ -387,7 +402,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
         if (!activo) return;
         if (json.success && json.result?.full_name) {
           setForm(prev => ({ ...prev, nombre: json.result.full_name.toUpperCase() }));
-          showToast('âœ“ Nombre encontrado por DNI', 'success');
+          showToast('Nombre encontrado por DNI', 'success');
         } else {
           showToast('DNI no encontrado', 'error');
         }
@@ -426,8 +441,8 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       memoria:         datos.memoria         || prev.memoria,
       color:           datos.color           || prev.color,
     }));
-    const campos = [datos.marca, datos.nombreComercial, datos.imei1].filter(Boolean).join(' Â· ');
-    showToast(campos ? `âœ“ ${campos}` : 'Escaneado â€” revisa campos', campos ? 'success' : 'error');
+    const campos = [datos.marca, datos.nombreComercial, datos.imei1].filter(Boolean).join(' · ');
+    showToast(campos || 'Escaneado, revisa los campos', campos ? 'success' : 'error');
   };
 
   const onEscanerBoletaProcesando = () => {
@@ -445,10 +460,10 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       showToast('Completa nombre, RUT, IMEI y precio', 'error'); return;
     }
     if (!luhn(form.imei1)) {
-      showToast('El IMEI 1 no es vÃ¡lido â€” verifica los dÃ­gitos', 'error'); return;
+      showToast('El IMEI 1 no es válido, verifica los dígitos', 'error'); return;
     }
     if (form.imei2 && !luhn(form.imei2)) {
-      showToast('El IMEI 2 no es vÃ¡lido â€” verifica los dÃ­gitos', 'error'); return;
+      showToast('El IMEI 2 no es válido, verifica los dígitos', 'error'); return;
     }
     const clpVal = penToClp(form.precio);
     prepararBoleta(crearBoletaDataDesdeForm(form, fechaHora, clpVal), {
@@ -462,15 +477,15 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
 
   return (
     <div className="saas-boleta-page space-y-4">
-      {/* Modal selecciÃ³n tipo de boleta */}
+      {/* Selección del tipo de boleta */}
       {modalBoleta && (
         <div className="saas-modal-backdrop fixed inset-0 z-[200] flex items-center justify-center p-4">
           <div className="saas-detail-modal w-full max-w-sm p-6">
             <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <FileText size={22} className="text-blue-600" />
             </div>
-            <h3 className="text-base font-bold text-gray-800 text-center mb-1">Â¿QuÃ© boleta deseas generar?</h3>
-            <p className="text-xs text-gray-400 text-center mb-5">Selecciona el formato segÃºn tu impresora</p>
+            <h3 className="text-base font-bold text-gray-800 text-center mb-1">¿Qué boleta deseas generar?</h3>
+            <p className="text-xs text-gray-400 text-center mb-5">Selecciona el formato según tu impresora</p>
             <div className="space-y-3">
               <button
                 type="button"
@@ -478,7 +493,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                 onClick={() => imprimirBoleta(modalBoleta, 1)}
                 className="saas-primary w-full flex-col py-3.5 disabled:cursor-not-allowed disabled:opacity-60">
                 <span>Boleta 1</span>
-                <span className="text-xs font-normal opacity-80">Formato tÃ©rmico 48mm â€” Roberto Pizarro</span>
+                <span className="text-xs font-normal opacity-80">Formato térmico 48 mm, Roberto Pizarro</span>
               </button>
               <button
                 type="button"
@@ -486,7 +501,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                 onClick={() => imprimirBoleta(modalBoleta, 2)}
                 className="saas-secondary w-full flex-col py-3.5 disabled:cursor-not-allowed disabled:opacity-60">
                 <span>Boleta 2</span>
-                <span className="text-xs font-normal opacity-80">Formato 80mm â€” Ãlvaro Pizarro Â· PDF417</span>
+                <span className="text-xs font-normal opacity-80">Formato 80 mm, Álvaro Pizarro · PDF417</span>
               </button>
               <button
                 type="button"
@@ -495,6 +510,14 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                 className="saas-secondary w-full flex-col py-3.5 disabled:cursor-not-allowed disabled:opacity-60">
                 <span>Boleta 3</span>
                 <span className="text-xs font-normal opacity-80">BOLETA PIZARRO VILLARROEL #3</span>
+              </button>
+              <button
+                type="button"
+                disabled={imprimiendoBoleta}
+                onClick={() => imprimirBoleta(modalBoleta, 4)}
+                className="saas-secondary w-full flex-col py-3.5 disabled:cursor-not-allowed disabled:opacity-60">
+                <span>Boleta 4</span>
+                <span className="text-xs font-normal opacity-80">Factura de página completa con logo editable</span>
               </button>
             </div>
             <button type="button" disabled={imprimiendoBoleta} onClick={() => setModalBoleta(null)} className="saas-secondary mt-4 w-full disabled:cursor-not-allowed disabled:opacity-60">Cancelar</button>
@@ -529,47 +552,33 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
           </div>
         </div>
       )}
-      {/* Header + tabs */}
-      <div className="saas-boleta-card">
-        <div className="saas-boleta-header">
-          <div>
-            <p className="saas-page-kicker">Boleta extranjera</p>
-            <h2 className="saas-page-title flex items-center gap-2"><FileText size={20} className="text-blue-600"/> Boleta Extranjera (Chile)</h2>
-            <p className="saas-page-desc">Genera boletas desde ventas existentes o con datos manuales.</p>
+      <div className="boleta-workspace">
+        <div className="boleta-utility-row">
+          <div className="saas-segmented" role="tablist" aria-label="Flujo de boletas">
+            <button type="button" role="tab" aria-selected={modo === 'buscar'} onClick={() => setModo('buscar')} data-active={modo === 'buscar'}>Desde venta</button>
+            <button type="button" role="tab" aria-selected={modo === 'nueva'} onClick={() => setModo('nueva')} data-active={modo === 'nueva'}>Registro manual</button>
+            <button type="button" role="tab" aria-selected={modo === 'historial'} onClick={() => setModo('historial')} data-active={modo === 'historial'}>Historial</button>
           </div>
-        </div>
-        <div className="p-5">
-
-        {/* Fecha y hora de emisiÃ³n */}
-        <div className="mb-4">
-          <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Fecha y hora de emisiÃ³n</label>
+          <label className="boleta-date-field">Fecha de emisión
           <input
             type="datetime-local"
             value={fechaHora}
             onChange={e => setFechaHora(e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           />
+          </label>
         </div>
 
-        <div className="saas-segmented mb-5">
-          <button onClick={() => setModo('buscar')} data-active={modo === 'buscar'}>
-            Buscar por DNI
-          </button>
-          <button onClick={() => setModo('nueva')} data-active={modo === 'nueva'}>
-            Nueva Boleta
-          </button>
-          <button onClick={() => setModo('historial')} data-active={modo === 'historial'}>
-            Historial
-          </button>
-        </div>
-
-        {/* â”€â”€ MODO BUSCAR â”€â”€ */}
+        {/* Modo buscar */}
         {modo === 'buscar' && (
-          <div className="space-y-4">
-            <div className="flex gap-2">
+          <section className="workflow-panel workflow-flow" aria-labelledby="search-sale-title">
+            <div className="workflow-heading">
+              <span>01</span>
+              <div><h2 id="search-sale-title">Buscar una venta</h2><p>Usa el DNI registrado para recuperar los equipos del cliente.</p></div>
+            </div>
+            <div className="workflow-search">
               <input value={searchDni} onChange={e => setSearchDni(e.target.value.replace(/\D/g,''))}
                 onKeyDown={e => e.key === 'Enter' && buscar()}
-                placeholder="DNI del cliente..." inputMode="numeric"
+                placeholder="DNI del cliente" inputMode="numeric" aria-label="DNI del cliente"
                 className="flex-1 min-w-0" />
               <button onClick={buscar} disabled={buscandoVentas} className="saas-primary disabled:cursor-not-allowed disabled:opacity-60">
                 <Search size={16}/> {buscandoVentas ? 'Buscando...' : 'Buscar'}
@@ -583,14 +592,14 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
               <>
                 <div className="bg-gray-50 rounded-lg p-3 border text-sm">
                   <p className="font-semibold text-gray-800">{clienteEncontrado.nombre}</p>
-                  <p className="text-gray-500 text-xs">DNI: {clienteEncontrado.dni} Â· {clienteEncontrado.celular || 'Sin celular'}</p>
+                  <p className="text-gray-500 text-xs">DNI: {clienteEncontrado.dni} · {clienteEncontrado.celular || 'Sin celular'}</p>
                 </div>
 
                 {ventasCliente.length === 0 ? (
                   <p className="text-gray-400 text-sm text-center py-4">Este cliente no tiene ventas registradas.</p>
                 ) : (
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold text-gray-500 uppercase">Selecciona equipos a incluir:</p>
+                    <p className="text-xs font-semibold text-gray-500 uppercase">{ventasCliente.length} {ventasCliente.length === 1 ? 'venta encontrada' : 'ventas encontradas'} · selecciona las que deseas incluir:</p>
                     {ventasCliente.map(v => {
                       const eq = equipos.find(e => e.idEquipo === v.imeiEquipo) || {};
                       const clp = penToClp(v.precio);
@@ -600,8 +609,8 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                           <div className="flex-1 text-sm">
                             <p className="font-medium text-gray-800">{v.marcaEquipo} {eq.nombreComercial || v.nombreComercial || v.modeloEquipo}</p>
                             <p className="text-xs text-gray-500 font-mono">IMEI: {v.imeiEquipo}</p>
-                            {eq.memoria && <p className="text-xs text-gray-500">{eq.memoria}GB Â· {eq.color || ''}</p>}
-                            <p className="text-xs text-gray-600 mt-1">S/. {parseFloat(v.precio).toFixed(2)} â†’ <span className="font-semibold text-green-700">${formatClp(clp)} CLP</span></p>
+                            {eq.memoria && <p className="text-xs text-gray-500">{eq.memoria}GB · {eq.color || ''}</p>}
+                            <p className="text-xs text-gray-600 mt-1">S/. {parseFloat(v.precio).toFixed(2)} → <span className="font-semibold text-green-700">${formatClp(clp)} CLP</span></p>
                           </div>
                         </label>
                       );
@@ -617,18 +626,22 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                       <p className="text-xs text-gray-400">S/. {totalPen.toFixed(2)} PEN</p>
                     </div>
                     <button onClick={emitirDesdeVentas} className="saas-primary">
-                      <Printer size={16}/> Emitir Boleta
+                      <Printer size={16}/> Generar boleta de venta
                     </button>
                   </div>
                 )}
               </>
             )}
-          </div>
+          </section>
         )}
 
-        {/* â”€â”€ MODO NUEVA BOLETA â”€â”€ */}
+        {/* Modo nueva boleta */}
         {modo === 'nueva' && (
-          <div className="space-y-4">
+          <section className="workflow-panel workflow-flow" aria-label="Registro manual de boleta">
+            <div className="workflow-heading">
+              <span>02</span>
+              <div><h2>Registrar manualmente</h2><p>Completa los datos del cliente y del equipo antes de imprimir.</p></div>
+            </div>
             {mostrarEscanerBoleta && (
               <EscanerIA
                 onResult={onEscanerBoleta}
@@ -676,7 +689,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                   className={`w-full border rounded p-2 text-sm font-mono ${form.imei1.length === 15 ? (luhn(form.imei1) ? 'border-green-400 bg-green-50' : 'border-red-400 bg-red-50') : ''}`} inputMode="numeric"/>
                 {form.imei1.length === 15 && (
                   <p className={`text-xs mt-1 font-medium ${luhn(form.imei1) ? 'text-green-600' : 'text-red-600'}`}>
-                    {luhn(form.imei1) ? 'âœ“ IMEI vÃ¡lido' : 'âœ— IMEI invÃ¡lido â€” verifica los dÃ­gitos'}
+                    {luhn(form.imei1) ? 'IMEI válido' : 'IMEI inválido, verifica los dígitos'}
                   </p>
                 )}
               </div>
@@ -686,11 +699,11 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                   className={`w-full border rounded p-2 text-sm font-mono ${form.imei2.length === 15 ? (luhn(form.imei2) ? 'border-green-400 bg-green-50' : 'border-red-400 bg-red-50') : ''}`} inputMode="numeric"/>
                 {form.imei2.length === 15 && (
                   <p className={`text-xs mt-1 font-medium ${luhn(form.imei2) ? 'text-green-600' : 'text-red-600'}`}>
-                    {luhn(form.imei2) ? 'âœ“ IMEI vÃ¡lido' : 'âœ— IMEI invÃ¡lido â€” verifica los dÃ­gitos'}
+                    {luhn(form.imei2) ? 'IMEI válido' : 'IMEI inválido, verifica los dígitos'}
                   </p>
                 )}
               </div>
-              <div><label className="block text-xs text-gray-500 mb-1">NÂ° Serie (S/N)</label><input name="sn" value={form.sn} onChange={handleFormChange} className="w-full border rounded p-2 text-sm font-mono"/></div>
+              <div><label className="block text-xs text-gray-500 mb-1">N.º de serie (S/N)</label><input name="sn" value={form.sn} onChange={handleFormChange} className="w-full border rounded p-2 text-sm font-mono"/></div>
               <div><label className="block text-xs text-gray-500 mb-1">Marca</label><input name="marca" value={form.marca} onChange={handleFormChange} className="w-full border rounded p-2 text-sm"/></div>
               <div><label className="block text-xs text-gray-500 mb-1">Nombre Comercial</label><input name="nombreComercial" value={form.nombreComercial} onChange={handleFormChange} className="w-full border rounded p-2 text-sm"/></div>
               <div><label className="block text-xs text-gray-500 mb-1">Modelo</label><input name="modelo" value={form.modelo} onChange={handleFormChange} className="w-full border rounded p-2 text-sm"/></div>
@@ -714,11 +727,15 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                 <Printer size={16}/> {boletaEnEdicion ? 'Actualizar e imprimir' : 'Generar Boleta'}
               </button>
             </div>
-          </div>
+          </section>
         )}
 
         {modo === 'historial' && (
-          <div className="space-y-3">
+          <section className="workflow-panel workflow-flow" aria-label="Historial de boletas de venta">
+            <div className="workflow-heading">
+              <span>03</span>
+              <div><h2>Historial de boletas de venta</h2><p>Edita o vuelve a imprimir un documento ya emitido.</p></div>
+            </div>
             {cargandoHistorial ? (
               <div className="saas-empty py-10">
                 <p className="text-sm">Cargando historial...</p>
@@ -726,8 +743,8 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
             ) : historialBoletas.length === 0 ? (
               <div className="saas-empty py-10">
                 <FileText size={40} strokeWidth={1.4} />
-                <p className="text-sm font-semibold">Sin boletas guardadas</p>
-                <p className="text-xs">Las boletas apareceran aqui despues de imprimirlas.</p>
+                <p className="text-sm font-semibold">Sin boletas de venta guardadas</p>
+                <p className="text-xs">Las boletas de venta apareceran aqui despues de imprimirlas.</p>
               </div>
             ) : (
               <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
@@ -742,10 +759,10 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                           <p className="mt-1 truncate text-sm font-semibold text-slate-800">{equipoPreview}</p>
                         )}
                         <p className="mt-0.5 text-xs text-slate-500">
-                          Nro {boleta.nBoleta || '-'} Â· DNI {boleta.clienteDni || '-'} Â· {boleta.fechaHora ? new Date(boleta.fechaHora).toLocaleString('es-PE') : 'Sin fecha'}
+                          Nro {boleta.nBoleta || '-'} · DNI {boleta.clienteDni || '-'} · {boleta.fechaHora ? new Date(boleta.fechaHora).toLocaleString('es-PE') : 'Sin fecha'}
                         </p>
                         <p className="mt-1 text-xs font-semibold text-emerald-700">
-                          ${formatClp(Number(boleta.totalClp || 0))} CLP Â· S/. {Number(boleta.totalPen || 0).toFixed(2)}
+                          ${formatClp(Number(boleta.totalClp || 0))} CLP · S/. {Number(boleta.totalPen || 0).toFixed(2)}
                         </p>
                         <p className="mt-1 truncate font-mono text-xs text-slate-500">
                           IMEI {imeisPreview || '-'}
@@ -779,9 +796,8 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                 )}
               </div>
             )}
-          </div>
+          </section>
         )}
-        </div>
       </div>
     </div>
   );

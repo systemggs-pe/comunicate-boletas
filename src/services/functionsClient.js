@@ -6,7 +6,7 @@ function looksLikeHtml(text) {
   return /^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text);
 }
 
-async function request(path, payload, authenticated = true) {
+async function request(path, payload, authenticated = true, baseUrl = BACKEND_BASE_URL) {
   const headers = {'Content-Type': 'application/json'};
   if (authenticated) {
     const user = auth.currentUser;
@@ -14,7 +14,7 @@ async function request(path, payload, authenticated = true) {
     headers.Authorization = `Bearer ${await user.getIdToken()}`;
   }
 
-  const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
+  const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
     headers,
     body: JSON.stringify(payload || {}),
@@ -52,8 +52,42 @@ export function listarBoletas(cursor = '') {
   return request('/api/boletas', {action: 'list', cursor}, true);
 }
 
-export function buscarVentasBoleta(dni) {
-  return request('/api/boletas', {action: 'lookupSales', dni}, true);
+function mapOperationalSalesLookup(data, dni) {
+  const normalizedDni = String(dni || '').replace(/\D/g, '');
+  const clientes = Array.isArray(data?.clientes) ? data.clientes : [];
+  const source = clientes.find(cliente => String(cliente?.dni || cliente?.id || '').replace(/\D/g, '') === normalizedDni);
+  if (!source) return {cliente: null, ventas: [], equipos: []};
+  const ventas = Array.isArray(source.ventas) ? source.ventas : [];
+  return {
+    cliente: {
+      dni: normalizedDni,
+      nombre: source.nombre || ventas[0]?.nombreCliente || normalizedDni,
+      celular: source.celular || ventas[0]?.celularCliente || '',
+      tipoDocumento: source.tipoDocumento || ventas[0]?.tipoDocumentoCliente || 'DNI',
+    },
+    ventas: ventas.map(venta => ({...venta, dniCliente: normalizedDni})),
+    equipos: Array.isArray(source.equipos) ? source.equipos : [],
+  };
+}
+
+export async function buscarVentasBoleta(dni) {
+  const result = await request('/api/boletas', {action: 'lookupSales', dni}, true);
+  if (Array.isArray(result?.ventas) && result.ventas.length > 0) return result;
+
+  // Durante `npm run dev`, la funcion publicada puede no incluir aun los cambios
+  // locales. El proxy de Vite consulta el mismo backend operativo de Ventas sin CORS.
+  if (import.meta.env.DEV) {
+    const operational = await request('/operational-api/api/clientes', {
+      action: 'queryOperational',
+      searchTerm: String(dni || '').replace(/\D/g, ''),
+      searchField: 'dni',
+      limit: 1,
+    }, true, '');
+    const mapped = mapOperationalSalesLookup(operational, dni);
+    if (mapped.ventas.length > 0) return mapped;
+  }
+
+  return result;
 }
 
 export function obtenerConfiguracionBoleta() {

@@ -14,6 +14,21 @@ export const DEFAULT_BOLETA_EXTRANJERA_EMISORES = {
     rut: '18.478.314-2',
     direccion: '18 DE SEPTIEMBRE 257',
   },
+  formato4: {
+    nombre: 'NORTHLINE RETAIL INC.',
+    rut: 'SIMULADO',
+    direccion: '702 Market Avenue',
+    ciudad: 'Orlando, FL 32801',
+    pais: 'United States',
+    email: 'support@northlineretail.example',
+    telefono: '+1 (407) 555-0184',
+    sitioWeb: 'www.northlineretail.example/contact',
+    metodoPago: 'Tarjeta',
+    impuestoPorcentaje: '5',
+    notas: 'To ensure we are able to help you as best we can, please include your reference number.',
+    terminos: 'All Rights Reserved',
+    logoDataUrl: '',
+  },
 };
 
 export function mergeBoletaExtranjeraEmisores(config = {}) {
@@ -32,4 +47,3 @@ export function getBoletaExtranjeraEmisor(config, formato) {
   const merged = mergeBoletaExtranjeraEmisores(config);
   return merged[`formato${formato}`] || merged.formato1;
 }
-

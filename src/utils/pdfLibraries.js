@@ -8,30 +8,19 @@ export function getPdfTools() {
 }
 
 export async function getPdf417Generator() {
-  if (typeof window.__pdf417gen === 'function') return window.__pdf417gen;
   if (!pdf417LoadPromise) {
-    pdf417LoadPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector('script[data-pdf417]');
-      if (existing) {
-        existing.addEventListener('load', resolve, {once: true});
-        existing.addEventListener('error', reject, {once: true});
-        return;
-      }
-      const script = document.createElement('script');
-      script.setAttribute('data-pdf417', '1');
-      script.src = '/pdf417.js';
-      script.onload = resolve;
-      script.onerror = () => reject(new Error('PDF417_LOCAL_LOAD_FAILED'));
-      document.head.appendChild(script);
-    });
+    pdf417LoadPromise = import('pdf417/build/index.js')
+      .then(module => {
+        const imported = module?.default || module;
+        const generator = imported?.default || imported;
+        if (typeof generator !== 'function') throw new Error('PDF417_NOT_AVAILABLE');
+        return generator;
+      })
+      .catch(error => {
+        pdf417LoadPromise = null;
+        if (error?.message === 'PDF417_NOT_AVAILABLE') throw error;
+        throw new Error('PDF417_NOT_AVAILABLE', {cause: error});
+      });
   }
-  await pdf417LoadPromise;
-  if (!window.__pdf417gen && window.pdf417) {
-    window.__pdf417gen = window.pdf417.default || window.pdf417;
-  }
-  if (typeof window.__pdf417gen !== 'function') {
-    throw new Error('PDF417_NOT_AVAILABLE');
-  }
-  return window.__pdf417gen;
+  return pdf417LoadPromise;
 }
-

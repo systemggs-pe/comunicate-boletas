@@ -7,6 +7,9 @@ const SCOPE = 'shared';
 export const HISTORY_PAGE_SIZE = 50;
 export const SALES_LOOKUP_LIMIT = 50;
 export const DUPLICATE_QUERY_LIMIT = 2;
+const OPERATIONAL_CLIENTS_URL = String(
+  process.env.OPERATIONAL_CLIENTS_URL || 'https://comunicate-registros-v2.netlify.app/api/clientes',
+).trim();
 
 function baseRef(db) {
   return db.collection('artifacts').doc(APP_ID).collection('users').doc(SCOPE);
@@ -65,6 +68,7 @@ function normalizeEquiposMap(value, ventas) {
 
 function normalizeEmisor(value) {
   const emitter = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const logoDataUrl = cleanText(emitter.logoDataUrl, 300000);
   return {
     nombre: cleanText(emitter.nombre, 180),
     rut: cleanText(emitter.rut, 40),
@@ -74,6 +78,15 @@ function normalizeEmisor(value) {
     comuna: cleanText(emitter.comuna, 80),
     ciudad: cleanText(emitter.ciudad, 80),
     vendedor: cleanText(emitter.vendedor, 40),
+    pais: cleanText(emitter.pais, 80),
+    email: cleanText(emitter.email, 140),
+    telefono: cleanText(emitter.telefono, 60),
+    sitioWeb: cleanText(emitter.sitioWeb, 180),
+    metodoPago: cleanText(emitter.metodoPago, 80),
+    impuestoPorcentaje: cleanText(emitter.impuestoPorcentaje, 10),
+    notas: cleanText(emitter.notas, 400),
+    terminos: cleanText(emitter.terminos, 220),
+    logoDataUrl: /^data:image\/(?:png|jpe?g|webp);base64,/i.test(logoDataUrl) ? logoDataUrl : '',
   };
 }
 
@@ -81,7 +94,7 @@ function normalizeBoletaPayload(payload) {
   const action = cleanText(payload?.action, 20);
   if (!['save', 'update'].includes(action)) throw Object.assign(new Error('ACTION_INVALIDA'), {status: 400});
   const formato = Number(payload.formato);
-  if (![1, 2, 3].includes(formato)) throw Object.assign(new Error('FORMATO_INVALIDO'), {status: 400});
+  if (![1, 2, 3, 4].includes(formato)) throw Object.assign(new Error('FORMATO_INVALIDO'), {status: 400});
 
   const raw = payload.boletaData || {};
   const ventas = normalizeVentas(raw.ventas);
@@ -102,7 +115,7 @@ function normalizeBoletaPayload(payload) {
     totalClp: cleanMoney(raw.totalClp),
     fechaHora,
     nBoleta: Number.isInteger(Number(raw.nBoleta)) ? Number(raw.nBoleta) : null,
-    emisor: normalizeEmisor(raw.emisor),
+    emisor: {...normalizeEmisor(raw.emisor), logoDataUrl: ''},
   };
   if (!boletaData.cliente.nombre || !boletaData.cliente.dni) throw Object.assign(new Error('CLIENTE_INVALIDO'), {status: 400});
   if (!boletaData.totalClp) throw Object.assign(new Error('TOTAL_INVALIDO'), {status: 400});
@@ -171,15 +184,69 @@ async function listBoletas(db, payload) {
   };
 }
 
-async function lookupSales(db, payload) {
+function mapOperationalLookup(data, dni) {
+  const clientes = Array.isArray(data?.clientes) ? data.clientes : [];
+  const source = clientes.find(item => cleanDni(item?.dni || item?.id) === dni);
+  if (!source) return null;
+  const ventas = Array.isArray(source.ventas)
+    ? source.ventas.map(sale => ({...sale, dniCliente: dni}))
+      .sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0))
+    : [];
+  if (!ventas.length) return null;
+  return {
+    cliente: {
+      dni,
+      nombre: cleanText(source.nombre || ventas[0]?.nombreCliente || dni, 180),
+      celular: cleanText(source.celular || ventas[0]?.celularCliente, 30),
+      tipoDocumento: cleanText(source.tipoDocumento || ventas[0]?.tipoDocumentoCliente || 'DNI', 30),
+    },
+    ventas,
+    equipos: Array.isArray(source.equipos) ? source.equipos : [],
+  };
+}
+
+async function lookupOperationalSales(dni, authorization, fetchImpl = fetch) {
+  if (!authorization || !OPERATIONAL_CLIENTS_URL) return null;
+  const response = await fetchImpl(OPERATIONAL_CLIENTS_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: authorization,
+    },
+    body: JSON.stringify({
+      action: 'queryOperational',
+      searchTerm: dni,
+      searchField: 'dni',
+      limit: 1,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw Object.assign(new Error(data.error || 'VENTAS_BACKEND_NO_DISPONIBLE'), {
+      status: response.status >= 400 && response.status < 500 ? response.status : 502,
+    });
+  }
+  return mapOperationalLookup(data, dni);
+}
+
+async function lookupSales(db, payload, options = {}) {
   const dni = cleanDni(payload.dni);
   if (!dni) throw Object.assign(new Error('DNI_INVALIDO'), {status: 400});
   const base = baseRef(db);
-  const [clientSnap, salesSnap] = await Promise.all([
+  const [clientSnap, stringSalesSnap] = await Promise.all([
     base.collection('clientes').doc(dni).get(),
     base.collection('ventas').where('dniCliente', '==', dni).limit(SALES_LOOKUP_LIMIT).get(),
   ]);
-  const ventas = salesSnap.docs.map(doc => ({id: doc.id, ...doc.data()}))
+  let salesDocs = stringSalesSnap.docs;
+  const numericDni = Number(dni);
+  if (!salesDocs.length && Number.isSafeInteger(numericDni) && String(numericDni) === dni) {
+    const numericSalesSnap = await base.collection('ventas')
+      .where('dniCliente', '==', numericDni)
+      .limit(SALES_LOOKUP_LIMIT)
+      .get();
+    salesDocs = numericSalesSnap.docs;
+  }
+  const ventas = salesDocs.map(doc => ({id: doc.id, ...doc.data(), dniCliente: dni}))
     .sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0));
   const imeis = Array.from(new Set(ventas.map(sale => cleanImei(sale.imeiEquipo)).filter(Boolean)));
   const equipmentSnaps = await Promise.all(imeis.map(imei => base.collection('equipos').doc(imei).get()));
@@ -192,12 +259,17 @@ async function lookupSales(db, payload) {
     celular: cleanText(clientData?.celular || firstSale.celularCliente, 30),
     tipoDocumento: cleanText(clientData?.tipoDocumento || firstSale.tipoDocumentoCliente || 'DNI', 30),
   } : null;
-  return {cliente, ventas, equipos};
+  if (ventas.length) return {cliente, ventas, equipos};
+
+  const operationalResult = await lookupOperationalSales(dni, options.authorization, options.fetchImpl);
+  return operationalResult || {cliente, ventas, equipos};
 }
 
 function normalizeConfig(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  return Object.fromEntries([1, 2, 3].map(format => [`formato${format}`, normalizeEmisor(source[`formato${format}`])]));
+  return Object.fromEntries([1, 2, 3, 4]
+    .filter(format => source[`formato${format}`])
+    .map(format => [`formato${format}`, normalizeEmisor(source[`formato${format}`])]));
 }
 
 async function getConfig(db) {
@@ -302,10 +374,10 @@ async function saveBoleta(db, payload) {
   });
 }
 
-export async function dispatchBoletas(db, body) {
+export async function dispatchBoletas(db, body, options = {}) {
   const action = cleanText(body?.action, 30);
   if (action === 'list') return listBoletas(db, body);
-  if (action === 'lookupSales') return lookupSales(db, body);
+  if (action === 'lookupSales') return lookupSales(db, body, options);
   if (action === 'getConfig') return getConfig(db);
   if (action === 'saveConfig') return saveConfig(db, body);
   if (action === 'save' || action === 'update') return saveBoleta(db, body);
@@ -317,13 +389,18 @@ export const __test = {
   cleanImei,
   listBoletas,
   lookupSales,
+  lookupOperationalSales,
+  mapOperationalLookup,
   equipmentKeys,
   normalizeBoletaPayload,
+  normalizeConfig,
   safeBoleta,
   saveBoleta,
 };
 
-export const handler = event => handlePost(event, body => dispatchBoletas(getAdminDb(), body), {
+export const handler = event => handlePost(event, body => dispatchBoletas(getAdminDb(), body, {
+  authorization: event.headers?.authorization || event.headers?.Authorization || '',
+}), {
   name: 'boletas',
   rateLimit: {max: 90, windowMs: 60_000},
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import {ScanBarcode, X} from 'lucide-react';
+import {ScanBarcode, X} from '../../components/Icons.jsx';
 import {llamarFuncionSegura} from '../../services/functionsClient.js';
 import {normalizarEscaneo} from '../../utils/scanner.js';
 
@@ -223,4 +223,3 @@ export function EscanerIA({onResult, onClose, onProcessingStart, onError}) {
     </div>
   );
 }
-

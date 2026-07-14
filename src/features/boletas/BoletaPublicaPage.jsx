@@ -1,5 +1,5 @@
 import React, {useMemo, useState} from 'react';
-import {AlertCircle, Building2, CheckCircle2, FileText, PackageCheck, Search} from 'lucide-react';
+import {AlertCircle, Building2, CheckCircle2, FileText, PackageCheck, Search} from '../../components/Icons.jsx';
 import {consultarBoletaPublica} from '../../services/functionsClient.js';
 import {formatClp} from '../../utils/currency.js';
 
@@ -51,12 +51,12 @@ export function BoletaPublicaPage() {
     <main className="public-page">
       <header className="public-header">
         <div className="public-brand"><FileText size={22}/><span>COMUNIC@TE</span></div>
-        <span>Verificacion de boleta</span>
+        <span>Verificacion de boleta de venta</span>
       </header>
       <section className="public-content">
         <div className="public-intro">
           <p className="saas-page-kicker">Consulta publica</p>
-          <h1>Comprueba la autenticidad de tu boleta</h1>
+          <h1>Comprueba tu BOLETA DE VENTA</h1>
           <p>Ingresa exactamente los datos impresos al final del documento.</p>
         </div>
         <form className="public-form" onSubmit={submit}>
@@ -71,7 +71,7 @@ export function BoletaPublicaPage() {
 
         {boleta && (
           <article className="validation-result">
-            <header><CheckCircle2 size={24}/><div><strong>La boleta existe y es valida</strong><span>Boleta Nro {boleta.nBoleta}</span></div></header>
+            <header><CheckCircle2 size={24}/><div><strong>La boleta de venta existe y es valida</strong><span>Boleta Nro {boleta.nBoleta}</span></div></header>
             <dl className="validation-summary">
               <div><dt>Cliente</dt><dd>{data.cliente?.nombre || boleta.clienteNombre}</dd></div>
               <div><dt>Fecha y hora</dt><dd>{new Date(boleta.fechaHora).toLocaleString('es-PE')}</dd></div>
