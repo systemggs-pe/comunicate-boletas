@@ -2,7 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
-import {__test, DUPLICATE_QUERY_LIMIT, HISTORY_PAGE_SIZE, SALES_LOOKUP_LIMIT} from '../functions/boletas.mjs';
+import {__test, dispatchBoletas, DUPLICATE_QUERY_LIMIT, HISTORY_PAGE_SIZE, SALES_LOOKUP_LIMIT} from '../functions/boletas.mjs';
+import {
+  getBoletaExtranjeraEmisorParaImpresion,
+  guardarBoletaExtranjeraLogoLocal,
+  mergeBoletaExtranjeraEmisores,
+} from '../../src/config/boletaExtranjera.js';
+import {penToUsd} from '../../src/utils/currency.js';
+import {crearReferenciaFormato6, formatearNumeroOrdenFormato5} from '../../src/features/boletas/boletaPdf.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -299,6 +306,7 @@ test('save duplicate checks are bounded and frontend contains no Firestore liste
 test('format 4 accepts expanded issuer data and a bounded image logo', () => {
   const payload = validPayload('123456789012345');
   payload.formato = 4;
+  payload.boletaData.totalUsd = 999;
   payload.boletaData.emisor = {
     nombre: 'NORTHLINE RETAIL INC.',
     rut: 'SIMULADO',
@@ -313,6 +321,7 @@ test('format 4 accepts expanded issuer data and a bounded image logo', () => {
   };
   const parsed = __test.normalizeBoletaPayload(payload);
   assert.equal(parsed.formato, 4);
+  assert.equal(parsed.boletaData.totalUsd, 26.67);
   assert.equal(parsed.boletaData.emisor.ciudad, 'Orlando, FL 32801');
   assert.equal(parsed.boletaData.emisor.logoDataUrl, '');
 });
@@ -321,4 +330,182 @@ test('legacy issuer config does not create an empty format 4 override', () => {
   const config = __test.normalizeConfig({formato1: {nombre: 'EMPRESA', rut: '1-9', direccion: 'DIRECCION'}});
   assert.ok(config.formato1);
   assert.equal(config.formato4, undefined);
+});
+
+test('format 4 never inherits issuer data stored by format 1', () => {
+  const config = {
+    formato1: {nombre: 'EMISOR UNO', rut: '1-9', direccion: 'DIRECCION UNO'},
+    formato4: {nombre: 'EMISOR CUATRO', rut: '4-9', direccion: 'DIRECCION CUATRO', logoDataUrl: 'data:image/jpeg;base64,ZmFrZQ=='},
+  };
+  const storedFormat1 = {
+    formato: 1,
+    emisor: {nombre: 'EMISOR HISTORICO UNO', rut: '11-9', direccion: 'DIRECCION HISTORICA'},
+  };
+
+  const format4 = getBoletaExtranjeraEmisorParaImpresion(config, 4, storedFormat1);
+  assert.equal(format4.nombre, 'EMISOR CUATRO');
+  assert.equal(format4.rut, '4-9');
+  assert.equal(format4.logoDataUrl, 'data:image/jpeg;base64,ZmFrZQ==');
+
+  const format1 = getBoletaExtranjeraEmisorParaImpresion(config, 1, storedFormat1);
+  assert.equal(format1.nombre, 'EMISOR HISTORICO UNO');
+});
+
+test('format 4 configuration preserves its logo data', () => {
+  const logoDataUrl = 'data:image/jpeg;base64,ZmFrZQ==';
+  const config = __test.normalizeConfig({
+    formato4: {nombre: 'EMISOR CUATRO', rut: '4-9', direccion: 'DIRECCION CUATRO', logoDataUrl, tipoCambioPenUsd: '3.75'},
+  });
+  assert.equal(config.formato4.logoDataUrl, logoDataUrl);
+  assert.equal(config.formato4.tipoCambioPenUsd, '3.75');
+});
+
+test('format 4 converts PEN amounts to USD with two decimals', () => {
+  assert.equal(penToUsd(1000, 3.75), 266.67);
+  assert.equal(penToUsd(1000, 0), 0);
+});
+
+test('format 4 PDF keeps the invoice layout in USD with an English long date', async () => {
+  const source = await readFile(`${ROOT}/src/features/boletas/boletaPdf.js`, 'utf8');
+  const format4 = source.slice(
+    source.indexOf('export async function generarBoletaExtranjera4'),
+    source.indexOf('export async function generarBoletaExtranjera5'),
+  );
+  assert.match(format4, /penToUsd\(sourceTotalPen/);
+  assert.match(format4, /format: 'letter'/);
+  assert.match(format4, /INVOICE #/);
+  assert.match(format4, /DESCRIPTION/);
+  assert.match(format4, /AMOUNT/);
+  assert.match(format4, /Intl\.DateTimeFormat\('en-US'/);
+  assert.match(format4, /month: 'long'/);
+});
+
+test('format 5 is independent, stored in USD, and uses the A4 marketplace template', async () => {
+  const payload = validPayload('123456789012346');
+  payload.formato = 5;
+  payload.boletaData.emisor = {
+    nombre: 'mobileusa',
+    rut: 'SIMULADO',
+    direccion: '9990 NW 14th St, Ste 110',
+    ciudad: 'Doral, Florida 33192-2702',
+    pais: 'United States',
+    vendedor: 'coloradoforsale',
+    tipoCambioPenUsd: '3.75',
+    impuestoPorcentaje: '5',
+  };
+  const parsed = __test.normalizeBoletaPayload(payload);
+  assert.equal(parsed.formato, 5);
+  assert.equal(parsed.boletaData.totalUsd, 26.67);
+  assert.equal(parsed.boletaData.emisor.vendedor, 'coloradoforsale');
+
+  const config = __test.normalizeConfig({
+    formato5: {...payload.boletaData.emisor, logoDataUrl: 'data:image/jpeg;base64,ZmFrZQ=='},
+  });
+  assert.equal(config.formato5.nombre, 'mobileusa');
+  assert.equal(config.formato5.logoDataUrl, 'data:image/jpeg;base64,ZmFrZQ==');
+
+  const source = await readFile(`${ROOT}/src/features/boletas/boletaPdf.js`, 'utf8');
+  const format5 = source.slice(source.indexOf('export async function generarBoletaExtranjera5'));
+  assert.match(format5, /format: 'a4'/);
+  assert.match(format5, /Order information/);
+  assert.match(format5, /Shipping address/);
+  assert.match(format5, /Items bought from/);
+  assert.match(format5, /5\.08, 2\.71/);
+  assert.match(format5, /BOLETA5-/);
+});
+
+test('format 5 order number combines month, day, year and the receipt suffix', () => {
+  const fecha = '2026-07-15T12:00:00-05:00';
+  assert.equal(formatearNumeroOrdenFormato5(1006, fecha), '07-15202-61006');
+  assert.equal(formatearNumeroOrdenFormato5('26-12838-58886', fecha), '07-15202-68886');
+  assert.equal(formatearNumeroOrdenFormato5('991234567890123', fecha), '07-15202-60123');
+  assert.match(formatearNumeroOrdenFormato5('', fecha), /^\d{2}-\d{5}-\d{5}$/);
+});
+
+test('format 5 logo survives leaving settings even if the deployed backend omits format 5', () => {
+  const storage = new Map();
+  const previousWindow = globalThis.window;
+  globalThis.window = {
+    localStorage: {
+      getItem: key => storage.get(key) || null,
+      setItem: (key, value) => storage.set(key, value),
+    },
+  };
+
+  try {
+    const logoDataUrl = 'data:image/jpeg;base64,ZmFrZQ==';
+    guardarBoletaExtranjeraLogoLocal(5, logoDataUrl);
+    const reloaded = mergeBoletaExtranjeraEmisores({
+      formato4: {nombre: 'FORMATO CUATRO', logoDataUrl: 'data:image/jpeg;base64,NA=='},
+    });
+    assert.equal(reloaded.formato5.logoDataUrl, logoDataUrl);
+    assert.equal(reloaded.formato4.logoDataUrl, 'data:image/jpeg;base64,NA==');
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
+test('format 5 logo survives a backend save and reload round trip', async () => {
+  const db = new FakeDb();
+  const logoDataUrl = 'data:image/jpeg;base64,ZmFrZQ==';
+  await dispatchBoletas(db, {
+    action: 'saveConfig',
+    config: {
+      formato5: {
+        nombre: 'mobileusa',
+        rut: 'SIMULADO',
+        direccion: '9990 NW 14th St, Ste 110',
+        tipoCambioPenUsd: '3.75',
+        logoDataUrl,
+      },
+    },
+  });
+  const reloaded = await dispatchBoletas(db, {action: 'getConfig'});
+  assert.equal(reloaded.config.formato5.logoDataUrl, logoDataUrl);
+});
+
+test('format 6 is independent, stored in USD, and preserves Apple receipt fields', () => {
+  const payload = validPayload('123456789012347');
+  payload.formato = 6;
+  payload.boletaData.emisor = {
+    nombre: 'Apple Columbia',
+    rut: 'SIMULADO',
+    direccion: '10300 Little Patuxent Parkway, Space 2040',
+    ciudad: 'Columbia, MD 21044',
+    tipoCambioPenUsd: '3.75',
+    impuestoPorcentaje: '6',
+    tarjetaUltimos4: '3282',
+    codigoTerminal: '025039',
+    applicationId: 'A0000000042203',
+    applicationPanSequence: '00',
+    deviceId: '0565',
+    cardType: 'Debit',
+    tvr: '0000008001',
+    tsi: 'E800',
+    diasDevolucion: '16',
+    partNumber: 'MPUA3LL/A',
+  };
+  const parsed = __test.normalizeBoletaPayload(payload);
+  assert.equal(parsed.formato, 6);
+  assert.equal(parsed.boletaData.totalUsd, 26.67);
+  assert.equal(parsed.boletaData.emisor.applicationId, 'A0000000042203');
+  assert.equal(parsed.boletaData.emisor.tarjetaUltimos4, '3282');
+});
+
+test('format 6 follows the measured Letter receipt geometry and dynamic barcode', async () => {
+  const source = await readFile(`${ROOT}/src/features/boletas/boletaPdf.js`, 'utf8');
+  const format6 = source.slice(source.indexOf('export async function generarBoletaExtranjera6'));
+  assert.match(format6, /format: 'letter'/);
+  assert.match(format6, /doc\.line\(144, y, 468, y\)/);
+  assert.match(format6, /rule\(178\.54\)/);
+  assert.match(format6, /JsBarcode\(barcodeTarget, reference\.barcode/);
+  assert.match(format6, /APPLE_RECEIPT_LOGO/);
+  assert.match(format6, /Payment Method/);
+  assert.match(format6, /Application PAN Sequence Number/);
+  assert.match(format6, /BOLETA6-/);
+
+  const reference = crearReferenciaFormato6('1681153706', '2023-10-22T13:21:00-04:00');
+  assert.equal(reference.barcode, '20231022R1681153706');
+  assert.equal(reference.reference, 'R1681153706');
 });

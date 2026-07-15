@@ -83,9 +83,22 @@ function normalizeEmisor(value) {
     telefono: cleanText(emitter.telefono, 60),
     sitioWeb: cleanText(emitter.sitioWeb, 180),
     metodoPago: cleanText(emitter.metodoPago, 80),
+    tipoCambioPenUsd: cleanText(emitter.tipoCambioPenUsd, 20),
     impuestoPorcentaje: cleanText(emitter.impuestoPorcentaje, 10),
     notas: cleanText(emitter.notas, 400),
     terminos: cleanText(emitter.terminos, 220),
+    tarjetaUltimos4: cleanText(emitter.tarjetaUltimos4, 4),
+    codigoTerminal: cleanText(emitter.codigoTerminal, 20),
+    applicationId: cleanText(emitter.applicationId, 40),
+    applicationPanSequence: cleanText(emitter.applicationPanSequence, 10),
+    deviceId: cleanText(emitter.deviceId, 20),
+    cardType: cleanText(emitter.cardType, 30),
+    tvr: cleanText(emitter.tvr, 30),
+    tsi: cleanText(emitter.tsi, 20),
+    diasDevolucion: cleanText(emitter.diasDevolucion, 4),
+    partNumber: cleanText(emitter.partNumber, 40),
+    policyUrl: cleanText(emitter.policyUrl, 220),
+    supportMessage: cleanText(emitter.supportMessage, 300),
     logoDataUrl: /^data:image\/(?:png|jpe?g|webp);base64,/i.test(logoDataUrl) ? logoDataUrl : '',
   };
 }
@@ -94,12 +107,18 @@ function normalizeBoletaPayload(payload) {
   const action = cleanText(payload?.action, 20);
   if (!['save', 'update'].includes(action)) throw Object.assign(new Error('ACTION_INVALIDA'), {status: 400});
   const formato = Number(payload.formato);
-  if (![1, 2, 3, 4].includes(formato)) throw Object.assign(new Error('FORMATO_INVALIDO'), {status: 400});
+  if (![1, 2, 3, 4, 5, 6].includes(formato)) throw Object.assign(new Error('FORMATO_INVALIDO'), {status: 400});
 
   const raw = payload.boletaData || {};
   const ventas = normalizeVentas(raw.ventas);
   if (!ventas.length) throw Object.assign(new Error('BOLETA_SIN_EQUIPO'), {status: 400});
   const equiposMap = normalizeEquiposMap(raw.equiposMap, ventas);
+  const totalPen = ventas.reduce((sum, sale) => sum + cleanMoney(sale.precio), 0);
+  const normalizedEmisor = normalizeEmisor(raw.emisor);
+  const penPerUsd = Number(normalizedEmisor.tipoCambioPenUsd || 3.75);
+  const totalUsd = [4, 5, 6].includes(formato) && Number.isFinite(penPerUsd) && penPerUsd > 0
+    ? Math.round((totalPen / penPerUsd) * 100) / 100
+    : 0;
   const equipoKeys = Array.from(new Set(ventas.flatMap(sale => [
     cleanImei(sale.imeiEquipo),
     cleanImei(sale.imei2Equipo),
@@ -113,9 +132,10 @@ function normalizeBoletaPayload(payload) {
     ventas,
     equiposMap,
     totalClp: cleanMoney(raw.totalClp),
+    totalUsd,
     fechaHora,
     nBoleta: Number.isInteger(Number(raw.nBoleta)) ? Number(raw.nBoleta) : null,
-    emisor: {...normalizeEmisor(raw.emisor), logoDataUrl: ''},
+    emisor: {...normalizedEmisor, logoDataUrl: ''},
   };
   if (!boletaData.cliente.nombre || !boletaData.cliente.dni) throw Object.assign(new Error('CLIENTE_INVALIDO'), {status: 400});
   if (!boletaData.totalClp) throw Object.assign(new Error('TOTAL_INVALIDO'), {status: 400});
@@ -125,7 +145,7 @@ function normalizeBoletaPayload(payload) {
     historialId: cleanText(payload.historialId, 180),
     boletaData,
     equipoKeys,
-    totalPen: ventas.reduce((sum, sale) => sum + cleanMoney(sale.precio), 0),
+    totalPen,
     origen: ventas.some(sale => sale.id) ? 'ventas' : 'manual',
   };
 }
@@ -155,6 +175,7 @@ function safeBoleta(id, data = {}) {
     clienteNombre: cleanText(data.clienteNombre || data.boletaData?.cliente?.nombre, 180),
     totalPen: cleanMoney(data.totalPen),
     totalClp: cleanMoney(data.totalClp || data.boletaData?.totalClp),
+    totalUsd: cleanMoney(data.totalUsd || data.boletaData?.totalUsd),
     fechaHora: cleanText(data.fechaHora || data.boletaData?.fechaHora, 40),
     formato: Number(data.formato || 1),
     origen: cleanText(data.origen, 20),
@@ -267,7 +288,7 @@ async function lookupSales(db, payload, options = {}) {
 
 function normalizeConfig(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  return Object.fromEntries([1, 2, 3, 4]
+  return Object.fromEntries([1, 2, 3, 4, 5, 6]
     .filter(format => source[`formato${format}`])
     .map(format => [`formato${format}`, normalizeEmisor(source[`formato${format}`])]));
 }
@@ -281,6 +302,15 @@ async function saveConfig(db, payload) {
   const config = normalizeConfig(payload.config);
   if (Object.values(config).some(item => !item.nombre || !item.rut || !item.direccion)) {
     throw Object.assign(new Error('CONFIGURACION_INVALIDA'), {status: 400});
+  }
+  if (config.formato4 && !(Number(config.formato4.tipoCambioPenUsd) > 0)) {
+    throw Object.assign(new Error('TIPO_CAMBIO_USD_INVALIDO'), {status: 400});
+  }
+  if (config.formato5 && !(Number(config.formato5.tipoCambioPenUsd) > 0)) {
+    throw Object.assign(new Error('TIPO_CAMBIO_USD_INVALIDO'), {status: 400});
+  }
+  if (config.formato6 && !(Number(config.formato6.tipoCambioPenUsd) > 0)) {
+    throw Object.assign(new Error('TIPO_CAMBIO_USD_INVALIDO'), {status: 400});
   }
   await baseRef(db).collection('configuracion').doc('boletaExtranjeraEmisores').set({
     ...config,
@@ -350,6 +380,7 @@ async function saveBoleta(db, payload) {
       clienteNombre: boletaData.cliente.nombre,
       totalPen: parsed.totalPen,
       totalClp: boletaData.totalClp,
+      totalUsd: boletaData.totalUsd,
       fechaHora: boletaData.fechaHora,
       formato: parsed.formato,
       origen: parsed.origen,

@@ -1,7 +1,7 @@
 import React, {useMemo, useState} from 'react';
 import {AlertCircle, Building2, CheckCircle2, FileText, PackageCheck, Search} from '../../components/Icons.jsx';
 import {consultarBoletaPublica} from '../../services/functionsClient.js';
-import {formatClp} from '../../utils/currency.js';
+import {formatClp, formatUsd} from '../../utils/currency.js';
 
 const initialForm = {rut: '', nBoleta: '', fecha: '', monto: ''};
 const publicDateFormatter = new Intl.DateTimeFormat('es-PE', {dateStyle: 'medium', timeStyle: 'short'});
@@ -74,9 +74,16 @@ export function BoletaPublicaPage() {
 
   const data = boleta?.boletaData || {};
   const emitter = data.emisor || {};
-  const total = Number(boleta?.totalClp || data.totalClp || 0);
-  const tax = Math.round(total * 0.19 / 1.19);
+  const isUsd = [4, 5, 6].includes(Number(boleta?.formato));
+  const total = isUsd
+    ? Number(boleta?.totalUsd || data.totalUsd || 0)
+    : Number(boleta?.totalClp || data.totalClp || 0);
+  const taxPercent = isUsd ? Math.max(0, Number(emitter.impuestoPorcentaje || 0)) : 19;
+  const tax = isUsd
+    ? Math.round((total - total / (1 + taxPercent / 100)) * 100) / 100
+    : Math.round(total * 0.19 / 1.19);
   const subtotal = total - tax;
+  const displayMoney = value => isUsd ? `${formatUsd(value)} USD` : `$${formatClp(value)} CLP`;
 
   return (
     <main className="public-page">
@@ -104,7 +111,7 @@ export function BoletaPublicaPage() {
             {renderFieldError('fecha')}
           </label>
           <label htmlFor="public-monto">Monto total
-            <input id="public-monto" name="monto" inputMode="decimal" value={form.monto} onChange={e => updateField('monto', e.target.value)} placeholder="CLP o PEN…" autoComplete="off" spellCheck="false" aria-invalid={Boolean(fieldErrors.monto)} aria-describedby={fieldErrors.monto ? 'public-monto-error' : undefined} required/>
+            <input id="public-monto" name="monto" inputMode="decimal" value={form.monto} onChange={e => updateField('monto', e.target.value)} placeholder="CLP, PEN o USD…" autoComplete="off" spellCheck="false" aria-invalid={Boolean(fieldErrors.monto)} aria-describedby={fieldErrors.monto ? 'public-monto-error' : undefined} required/>
             {renderFieldError('monto')}
           </label>
           <button className="saas-primary" type="submit" disabled={loading}><Search size={17}/> {loading ? 'Verificando…' : 'Verificar boleta'}</button>
@@ -123,7 +130,7 @@ export function BoletaPublicaPage() {
             <section className="validation-section">
               <h2><PackageCheck size={18}/> Artículo adquirido</h2>
               {items.map(item => <div className="validation-item" key={item.id}><strong>{item.name || 'Equipo'}</strong><span>{item.details || 'Sin caracteristicas registradas'}</span></div>)}
-              <div className="validation-item-total"><span>Total del articulo</span><strong>${formatClp(total)} CLP</strong></div>
+              <div className="validation-item-total"><span>Total del artículo</span><strong>{displayMoney(total)}</strong></div>
             </section>
             <section className="validation-section">
               <h2><Building2 size={18}/> Empresa emisora</h2>
@@ -132,9 +139,9 @@ export function BoletaPublicaPage() {
               <p>RUT {emitter.rut || '-'}</p>
             </section>
             <dl className="amounts">
-              <div><dt>Monto</dt><dd>${formatClp(subtotal)} CLP</dd></div>
-              <div><dt>Impuesto</dt><dd>${formatClp(tax)} CLP</dd></div>
-              <div className="amount-total"><dt>Total</dt><dd>${formatClp(total)} CLP</dd></div>
+              <div><dt>Monto</dt><dd>{displayMoney(subtotal)}</dd></div>
+              <div><dt>Impuesto</dt><dd>{displayMoney(tax)}</dd></div>
+              <div className="amount-total"><dt>Total</dt><dd>{displayMoney(total)}</dd></div>
             </dl>
           </article>
         )}

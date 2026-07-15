@@ -104,3 +104,94 @@ test('lookupPublicBoleta rejects when amount does not match', async () => {
     error => error.status === 404 && error.message === 'BOLETA_NO_ENCONTRADA',
   );
 });
+
+test('lookupPublicBoleta accepts the USD total printed by format 4', async () => {
+  const db = makeDb([
+    makeDoc('imei-usd', {
+      nBoleta: 1005,
+      clienteDni: '12345678-9',
+      totalClp: 265000,
+      totalPen: 1000,
+      fechaHora: '2025-06-16',
+      formato: 4,
+      boletaData: {
+        cliente: {nombre: 'Cliente Demo', dni: '12345678-9'},
+        totalClp: 265000,
+        fechaHora: '2025-06-16',
+        nBoleta: 1005,
+        emisor: {impuestoPorcentaje: '5', tipoCambioPenUsd: '3.75'},
+      },
+    }),
+  ]);
+
+  const result = await lookupPublicBoleta(db, {
+    rut: '12345678-9',
+    nBoleta: '1005',
+    fecha: '2025-06-16',
+    monto: '266.67',
+  });
+
+  assert.equal(result.boleta.formato, 4);
+  assert.equal(result.boleta.totalUsd, 266.67);
+  assert.equal(result.boleta.boletaData.totalUsd, 266.67);
+});
+
+test('lookupPublicBoleta accepts the USD total printed by format 5', async () => {
+  const db = makeDb([
+    makeDoc('imei-usd-5', {
+      nBoleta: 1006,
+      clienteDni: '12345678-9',
+      totalClp: 265000,
+      totalPen: 1000,
+      fechaHora: '2025-06-16',
+      formato: 5,
+      boletaData: {
+        cliente: {nombre: 'Cliente Demo', dni: '12345678-9'},
+        totalClp: 265000,
+        fechaHora: '2025-06-16',
+        nBoleta: 1006,
+        emisor: {impuestoPorcentaje: '5', tipoCambioPenUsd: '3.75'},
+      },
+    }),
+  ]);
+
+  const result = await lookupPublicBoleta(db, {
+    rut: '12345678-9',
+    nBoleta: '1006',
+    fecha: '2025-06-16',
+    monto: '266.67',
+  });
+
+  assert.equal(result.boleta.formato, 5);
+  assert.equal(result.boleta.totalUsd, 266.67);
+});
+
+test('lookupPublicBoleta accepts the USD total printed by format 6', async () => {
+  const db = makeDb([
+    makeDoc('imei-usd-6', {
+      nBoleta: 1007,
+      clienteDni: '12345678-9',
+      totalClp: 265000,
+      totalPen: 1000,
+      fechaHora: '2025-06-16',
+      formato: 6,
+      boletaData: {
+        cliente: {nombre: 'Cliente Demo', dni: '12345678-9'},
+        totalClp: 265000,
+        fechaHora: '2025-06-16',
+        nBoleta: 1007,
+        emisor: {impuestoPorcentaje: '6', tipoCambioPenUsd: '3.75'},
+      },
+    }),
+  ]);
+
+  const result = await lookupPublicBoleta(db, {
+    rut: '12345678-9',
+    nBoleta: '1007',
+    fecha: '2025-06-16',
+    monto: '266.67',
+  });
+
+  assert.equal(result.boleta.formato, 6);
+  assert.equal(result.boleta.totalUsd, 266.67);
+});

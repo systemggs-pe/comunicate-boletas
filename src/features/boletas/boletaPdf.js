@@ -1,7 +1,8 @@
 /* eslint-disable no-unused-vars, no-empty */
-import { penToClp } from '../../utils/currency.js';
+import {penToClp, penToUsd} from '../../utils/currency.js';
 import {getPdf417Generator, getPdfTools} from '../../utils/pdfLibraries.js';
 import {getBoletaExtranjeraEmisor} from '../../config/boletaExtranjera.js';
+import {APPLE_RECEIPT_LOGO} from './appleReceiptAssets.js';
 
 const lineas = value => String(value || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
 const rutVendedor = value => String(value || '').replace(/\./g, '').replace(/\s+/g, '');
@@ -29,6 +30,29 @@ function entregarPdf(docFinal, nombre, output = 'download') {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 15000);
   return {blob, url, nombre};
+}
+
+export function formatearNumeroOrdenFormato5(value, dateValue = new Date()) {
+  const parsedDate = new Date(dateValue);
+  const fecha = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+  const month = String(fecha.getMonth() + 1).padStart(2, '0');
+  const day = String(fecha.getDate()).padStart(2, '0');
+  const year = String(fecha.getFullYear()).padStart(4, '0');
+  const source = String(value ?? '').replace(/\D/g, '');
+  const fallback = String(fecha.getTime()).slice(-4);
+  const suffix = source.length >= 4 ? source.slice(-4) : fallback;
+  const digits = `${month}${day}${year}${suffix}`;
+  return `${digits.slice(0, 2)}-${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+export function crearReferenciaFormato6(value, dateValue = new Date(), page = 0) {
+  const parsedDate = new Date(dateValue);
+  const fecha = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+  const pad = number => String(number).padStart(2, '0');
+  const dateDigits = `${fecha.getFullYear()}${pad(fecha.getMonth() + 1)}${pad(fecha.getDate())}`;
+  const source = `${String(value ?? '').replace(/\D/g, '')}${page || ''}`;
+  const referenceDigits = `${dateDigits}${source || String(fecha.getTime())}`.slice(-10);
+  return {barcode: `${dateDigits}R${referenceDigits}`, reference: `R${referenceDigits}`};
 }
 
 function getBoletaVerificationUrl() {
@@ -650,15 +674,21 @@ export async function generarBoletaExtranjera4({cliente, ventas, equiposMap, tot
   const contentW = pageW - margin * 2;
   const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now()).slice(-7).padStart(7, '0');
   const fecha = fechaHora ? new Date(fechaHora) : new Date();
-  const pad = value => String(value).padStart(2, '0');
-  const fechaTexto = `${pad(fecha.getMonth() + 1)}/${pad(fecha.getDate())}/${fecha.getFullYear()}`;
+  const fechaTexto = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(fecha);
   const taxPercent = Math.min(100, Math.max(0, Number(emisor.impuestoPorcentaje || 0)));
-  const total = Math.max(0, Number(totalClp || 0));
-  const subtotal = taxPercent > 0 ? Math.round(total / (1 + taxPercent / 100)) : total;
-  const tax = total - subtotal;
-  const money = value => `$${Number(value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
   const ventasBoleta = Array.isArray(ventas) ? ventas : [];
-  const sourceTotal = ventasBoleta.reduce((sum, venta) => sum + penToClp(parseFloat(venta.precio || 0)), 0) || 1;
+  const sourceTotalPen = ventasBoleta.reduce((sum, venta) => sum + Number(venta.precio || 0), 0);
+  const total = sourceTotalPen > 0
+    ? penToUsd(sourceTotalPen, emisor.tipoCambioPenUsd)
+    : penToUsd(Math.max(0, Number(totalClp || 0)) / 266.67, emisor.tipoCambioPenUsd);
+  const roundUsd = value => Math.round(Number(value || 0) * 100) / 100;
+  const subtotal = taxPercent > 0 ? roundUsd(total / (1 + taxPercent / 100)) : total;
+  const tax = roundUsd(total - subtotal);
+  const money = value => `$${Number(value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
   const companyLines = [emisor.nombre, emisor.direccion, emisor.ciudad, emisor.pais, emisor.email, emisor.telefono, emisor.sitioWeb].filter(Boolean);
 
   const text = (value, x, y, size = 8, options = {}) => {
@@ -670,17 +700,12 @@ export async function generarBoletaExtranjera4({cliente, ventas, equiposMap, tot
 
   if (emisor.logoDataUrl) {
     try {
-      const img = new Image();
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = emisor.logoDataUrl;
-      });
+      const imageProperties = doc.getImageProperties(emisor.logoDataUrl);
       const maxW = 46;
       const maxH = 20;
-      const scale = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
-      const width = img.naturalWidth * scale;
-      const height = img.naturalHeight * scale;
+      const scale = Math.min(maxW / imageProperties.width, maxH / imageProperties.height);
+      const width = imageProperties.width * scale;
+      const height = imageProperties.height * scale;
       const format = /^data:image\/png/i.test(emisor.logoDataUrl) ? 'PNG' : 'JPEG';
       doc.addImage(emisor.logoDataUrl, format, margin, 14, width, height);
     } catch (error) {
@@ -731,10 +756,12 @@ export async function generarBoletaExtranjera4({cliente, ventas, equiposMap, tot
       venta.memoria || equipo.memoria,
       venta.color || equipo.color,
     ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim() || 'EQUIPO';
-    const sourceAmount = penToClp(parseFloat(venta.precio || 0));
+    const previousItemsTotal = ventasBoleta.slice(0, index).reduce((sum, item) => (
+      sum + roundUsd(subtotal * Number(item.precio || 0) / (sourceTotalPen || 1))
+    ), 0);
     const itemAmount = index === ventasBoleta.length - 1
-      ? subtotal - ventasBoleta.slice(0, index).reduce((sum, item) => sum + Math.round(subtotal * penToClp(parseFloat(item.precio || 0)) / sourceTotal), 0)
-      : Math.round(subtotal * sourceAmount / sourceTotal);
+      ? roundUsd(subtotal - previousItemsTotal)
+      : roundUsd(subtotal * Number(venta.precio || 0) / (sourceTotalPen || 1));
     const details = [
       ['Model Number', venta.modeloEquipo || equipo.modelo],
       ['Serial Number', venta.sn || equipo.sn],
@@ -799,4 +826,309 @@ export async function generarBoletaExtranjera4({cliente, ventas, equiposMap, tot
   text('Documento generado por COMUNIC@TE', right, pageH - 13, 6.8, {align: 'right', color: 110});
 
   return entregarPdf(doc, `BOLETA4-${nBoleta}.pdf`, output);
+}
+
+export async function generarBoletaExtranjera5({cliente, ventas, equiposMap, totalClp, fechaHora, nBoleta: numeroBoleta, emisor: emisorConfig, output = 'download'}) {
+  const {jsPDF} = getPdfTools();
+  const emisor = {...getBoletaExtranjeraEmisor({}, 5), ...(emisorConfig || {})};
+  const doc = new jsPDF({unit: 'mm', format: 'a4', orientation: 'portrait'});
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now());
+  const fecha = fechaHora ? new Date(fechaHora) : new Date();
+  const numeroOrden = formatearNumeroOrdenFormato5(nBoleta, fecha);
+  const fechaTexto = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(fecha);
+  const ventasBoleta = Array.isArray(ventas) ? ventas : [];
+  const sourceTotalPen = ventasBoleta.reduce((sum, venta) => sum + Number(venta.precio || 0), 0);
+  const total = sourceTotalPen > 0
+    ? penToUsd(sourceTotalPen, emisor.tipoCambioPenUsd)
+    : penToUsd(Math.max(0, Number(totalClp || 0)) / 266.67, emisor.tipoCambioPenUsd);
+  const roundUsd = value => Math.round(Number(value || 0) * 100) / 100;
+  const taxPercent = Math.min(100, Math.max(0, Number(emisor.impuestoPorcentaje || 0)));
+  const subtotal = taxPercent > 0 ? roundUsd(total / (1 + taxPercent / 100)) : total;
+  const tax = roundUsd(total - subtotal);
+  const money = value => `$ ${Number(value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+  let allocatedTotal = 0;
+  const itemAmountsUsd = ventasBoleta.map((venta, index) => {
+    if (index === ventasBoleta.length - 1) return roundUsd(total - allocatedTotal);
+    const amount = roundUsd(total * Number(venta.precio || 0) / (sourceTotalPen || 1));
+    allocatedTotal = roundUsd(allocatedTotal + amount);
+    return amount;
+  });
+  const ink = [16, 24, 32];
+  const bodyInk = [20, 28, 36];
+  const blue = [0, 56, 164];
+  const green = [80, 124, 84];
+  const grid = [232, 234, 236];
+  const headerFill = [249, 249, 249];
+  const seller = String(emisor.nombre || 'Seller').trim();
+  const itemsSeller = String(emisor.vendedor || seller).trim();
+  const itemCount = ventasBoleta.length;
+  const itemCountLabel = `${itemCount} ${itemCount === 1 ? 'item' : 'items'}`;
+
+  const text = (value, x, y, size = 8.5, options = {}) => {
+    doc.setFont('helvetica', options.bold ? 'bold' : 'normal');
+    doc.setFontSize(size);
+    const color = options.color || ink;
+    doc.setTextColor(...color);
+    doc.text(String(value ?? ''), x, y, options.align ? {align: options.align} : undefined);
+  };
+
+  const labelValue = (label, value, y, options = {}) => {
+    text(label, 5.3, y, 8.5);
+    const lines = doc.splitTextToSize(String(value || ''), 31.5).slice(0, options.maxLines || 2);
+    lines.forEach((line, index) => text(line, 33.1, y + index * 3.4, 8.5, {color: bodyInk}));
+  };
+
+  if (emisor.logoDataUrl) {
+    try {
+      const imageProperties = doc.getImageProperties(emisor.logoDataUrl);
+      const maxW = 31.16;
+      const maxH = 12.53;
+      const scale = Math.min(maxW / imageProperties.width, maxH / imageProperties.height);
+      const width = imageProperties.width * scale;
+      const height = imageProperties.height * scale;
+      const format = /^data:image\/png/i.test(emisor.logoDataUrl) ? 'PNG' : 'JPEG';
+      doc.addImage(emisor.logoDataUrl, format, 5.08, 2.71, width, height);
+    } catch (error) {
+      console.warn('No se pudo insertar el logo en la boleta 5:', error);
+    }
+  }
+
+  text('Order information', 5.3, 27.3, 16, {bold: true});
+  text('Shipping address', 65.5, 27.3, 16, {bold: true});
+  text('Order total', 125.3, 27.3, 16, {bold: true});
+
+  labelValue('Buyer', String(cliente?.nombre || '').toUpperCase(), 34.2);
+  labelValue('Seller', seller, 42, {maxLines: 1});
+  labelValue('Placed on', fechaTexto, 48, {maxLines: 1});
+  labelValue('Payment method', emisor.metodoPago || 'Paid', 54.4, {maxLines: 1});
+  labelValue('Paid on', fechaTexto, 60.7, {maxLines: 1});
+
+  const shippingLines = [
+    cliente?.direccion || emisor.direccion,
+    [cliente?.ciudad, cliente?.provincia, cliente?.codigoPostal].filter(Boolean).join(', ') || emisor.ciudad,
+    cliente?.pais || emisor.pais,
+  ].filter(Boolean);
+  shippingLines.slice(0, 3).forEach((line, index) => text(line, 65.3, 35.9 + index * 4.2, 8.5, {color: bodyInk}));
+
+  text(itemCountLabel, 125.3, 34.2, 8.5);
+  text(money(subtotal), 164.5, 34.2, 8.5, {color: bodyInk});
+  text('Shipping', 125.3, 40.5, 8.5);
+  text('Free', 164.5, 40.5, 8.5, {color: green});
+  text('Tax*', 125.3, 46.8, 8.5);
+  text(money(tax), 164.5, 46.8, 8.5, {color: bodyInk});
+  doc.setDrawColor(...ink);
+  doc.setLineWidth(0.35);
+  doc.line(125.3, 49.7, 197.6, 49.7);
+  text('Order total', 125.3, 55.6, 8.5, {bold: true});
+  text(money(total), 164, 55.6, 8.5, {bold: true, color: bodyInk});
+
+  const legalNote = emisor.notas || "*We're required by law to collect sales tax and applicable fees for certain tax authorities.";
+  const legalLines = doc.splitTextToSize(legalNote, 57).slice(0, 3);
+  legalLines.forEach((line, index) => text(line, 125.3, 63.2 + index * 5.3, 11));
+  text('Learn more', 125.3, 79.2, 11, {color: blue});
+  doc.setDrawColor(...blue);
+  doc.setLineWidth(0.2);
+  doc.line(125.3, 79.8, 145.2, 79.8);
+
+  text(`Items bought from ${itemsSeller}`, 5.3, 98.4, 16, {bold: true});
+  text(`Order number: ${numeroOrden}`, 5.3, 105.5, 12.5);
+
+  const columns = [5.3, 25.1, 125.7, 160.8, 197.6];
+  let tableY = 108.4;
+  const headerH = 7.7;
+  const drawTableHeader = () => {
+    doc.setFillColor(...headerFill);
+    doc.rect(columns[0], tableY, columns.at(-1) - columns[0], headerH, 'F');
+    doc.setDrawColor(...grid);
+    doc.setLineWidth(0.35);
+    doc.rect(columns[0], tableY, columns.at(-1) - columns[0], headerH);
+    columns.slice(1, -1).forEach(x => doc.line(x, tableY, x, tableY + headerH));
+    text('Quantity', 7.3, tableY + 5.1, 8.5, {bold: true});
+    text('Item name', 27, tableY + 5.1, 8.5, {bold: true});
+    text('Shipping service', 127.5, tableY + 5.1, 8.5, {bold: true});
+    text('Item price', 163.3, tableY + 5.1, 8.5, {bold: true});
+    tableY += headerH;
+  };
+  drawTableHeader();
+
+  ventasBoleta.forEach((venta, index) => {
+    const equipo = equiposMap?.[venta.imeiEquipo] || {};
+    const product = [
+      venta.marcaEquipo || equipo.marca,
+      equipo.nombreComercial || venta.nombreComercial || venta.modeloEquipo || equipo.modelo,
+      venta.memoria || equipo.memoria,
+      venta.color || equipo.color,
+    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim() || 'EQUIPO';
+    const itemAmount = itemAmountsUsd[index] || 0;
+    const productLines = doc.splitTextToSize(product, 36).slice(0, 2);
+    const imeiLines = [
+      venta.imeiEquipo ? `IMEI1: ${venta.imeiEquipo}` : '',
+      (equipo.imei2 || venta.imei2Equipo) ? `IMEI2: ${equipo.imei2 || venta.imei2Equipo}` : '',
+    ].filter(Boolean);
+    const rowH = Math.max(16, 6 + Math.max(productLines.length, imeiLines.length) * 3.5);
+    if (tableY + rowH > pageH - 12) {
+      doc.addPage('a4', 'portrait');
+      tableY = 12;
+      drawTableHeader();
+    }
+    doc.setDrawColor(...grid);
+    doc.rect(columns[0], tableY, columns.at(-1) - columns[0], rowH);
+    columns.slice(1, -1).forEach(x => doc.line(x, tableY, x, tableY + rowH));
+    text('1', 7.4, tableY + 5, 8.5);
+    productLines.forEach((line, lineIndex) => text(line, 27.4, tableY + 5 + lineIndex * 3.5, 8.5));
+    imeiLines.forEach((line, lineIndex) => text(line, 62.6, tableY + 5 + lineIndex * 3.5, 8.3));
+    text(money(itemAmount), 163.5, tableY + 5, 8.5);
+    tableY += rowH;
+  });
+
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    text(`${page}/${pageCount}`, pageW - 7.2, pageH - 4.6, 8.5, {align: 'right', color: [0, 0, 0]});
+  }
+  return entregarPdf(doc, `BOLETA5-${numeroOrden}.pdf`, output);
+}
+
+export async function generarBoletaExtranjera6({ventas, equiposMap, totalClp, fechaHora, nBoleta: numeroBoleta, emisor: emisorConfig, output = 'download'}) {
+  const {jsPDF, JsBarcode} = getPdfTools();
+  const emisor = {...getBoletaExtranjeraEmisor({}, 6), ...(emisorConfig || {})};
+  const doc = new jsPDF({unit: 'pt', format: 'letter', orientation: 'portrait'});
+  const pageW = doc.internal.pageSize.getWidth();
+  const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now());
+  const fecha = fechaHora ? new Date(fechaHora) : new Date();
+  const ventasBoleta = Array.isArray(ventas) && ventas.length ? ventas : [{}];
+  const sourceTotalPen = ventasBoleta.reduce((sum, venta) => sum + Number(venta.precio || 0), 0);
+  const totalUsd = sourceTotalPen > 0
+    ? penToUsd(sourceTotalPen, emisor.tipoCambioPenUsd)
+    : penToUsd(Math.max(0, Number(totalClp || 0)) / 266.67, emisor.tipoCambioPenUsd);
+  const taxPercent = Math.min(100, Math.max(0, Number(emisor.impuestoPorcentaje || 0)));
+  const roundUsd = value => Math.round(Number(value || 0) * 100) / 100;
+  const money = value => `$ ${Number(value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+  let allocatedTotal = 0;
+  const itemTotals = ventasBoleta.map((venta, index) => {
+    if (index === ventasBoleta.length - 1) return roundUsd(totalUsd - allocatedTotal);
+    const value = roundUsd(totalUsd * Number(venta.precio || 0) / (sourceTotalPen || 1));
+    allocatedTotal = roundUsd(allocatedTotal + value);
+    return value;
+  });
+
+  const pad = value => String(value).padStart(2, '0');
+  const headerDate = `${new Intl.DateTimeFormat('en-US', {month: 'long', day: 'numeric', year: 'numeric'}).format(fecha)} ${new Intl.DateTimeFormat('en-US', {hour: '2-digit', minute: '2-digit', hour12: true}).format(fecha)}`;
+  const transactionDate = `${fecha.getFullYear()}/${pad(fecha.getMonth() + 1)}/${pad(fecha.getDate())} ${pad(fecha.getHours())}:${pad(fecha.getMinutes())}:${pad(fecha.getSeconds())}`;
+  const returnDate = new Date(fecha);
+  returnDate.setDate(returnDate.getDate() + Math.max(0, Number(emisor.diasDevolucion || 16)));
+  const returnMonths = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May.', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
+  const returnDateText = `${returnMonths[returnDate.getMonth()]} ${pad(returnDate.getDate())}, ${returnDate.getFullYear()}`;
+  const cardLast4 = String(emisor.tarjetaUltimos4 || '3282').replace(/\D/g, '').slice(-4).padStart(4, '0');
+
+  const renderReceiptPage = (venta, pageIndex) => {
+    if (pageIndex > 0) doc.addPage('letter', 'portrait');
+    const equipo = equiposMap?.[venta.imeiEquipo] || {};
+    const itemTotal = itemTotals[pageIndex] || 0;
+    const subtotal = taxPercent > 0 ? roundUsd(itemTotal / (1 + taxPercent / 100)) : itemTotal;
+    const tax = roundUsd(itemTotal - subtotal);
+    const model = String(equipo.nombreComercial || venta.nombreComercial || venta.modeloEquipo || equipo.modelo || 'IPHONE').trim();
+    const color = String(venta.color || equipo.color || '').trim();
+    const memory = String(venta.memoria || equipo.memoria || '').trim();
+    const productName = [model.toUpperCase(), color, memory ? `${memory.toUpperCase()}-USA` : 'USA'].filter(Boolean).join(' ').replace(/\s+/g, ' ');
+    const serial = venta.sn || equipo.sn || '-';
+    const imei1 = venta.imeiEquipo || equipo.imei || '-';
+    const imei2 = equipo.imei2 || venta.imei2Equipo || '-';
+    const partNumber = venta.partNumber || equipo.partNumber || emisor.partNumber || 'MPUA3LL/A';
+    const reference = crearReferenciaFormato6(nBoleta, fecha, pageIndex);
+
+    const text = (value, x, y, options = {}) => {
+      doc.setFont('helvetica', options.bold ? 'bold' : 'normal');
+      doc.setFontSize(options.size || 8);
+      doc.setTextColor(0, 0, 0);
+      doc.text(String(value ?? ''), x, y, options.align ? {align: options.align} : undefined);
+    };
+    const rule = (y, width = 1) => {
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(width);
+      doc.line(144, y, 468, y);
+    };
+
+    doc.addImage(APPLE_RECEIPT_LOGO, 'JPEG', 140, 76, 24, 24);
+    text(emisor.nombre || 'Apple Columbia', 144, 109);
+    text(emisor.direccion, 144, 120);
+    text(emisor.ciudad, 144, 131);
+    text(emisor.email, 144, 141);
+    text(emisor.telefono, 144, 150);
+    text(emisor.sitioWeb, 144, 160);
+
+    rule(178.54);
+    text(headerDate, 144, 192);
+    rule(213.84);
+
+    text(productName, 144, 227, {bold: true});
+    text(money(subtotal), 468, 227, {bold: true, align: 'right'});
+    text(`Part Number: ${partNumber}`, 144, 241);
+    text(`Serial Number: ${serial}`, 144, 252);
+    text(`IMEI: ${imei1}`, 144, 263);
+    text(`IMEI2: ${imei2}`, 144, 274);
+    text(`Return Date: ${returnDateText}`, 144, 284);
+    text('ForSupport, Visit:www.apple.com/support', 144, 296);
+
+    rule(323.27);
+    text('Sub-Total', 354.6, 345, {align: 'right'});
+    text(money(subtotal), 468, 345, {align: 'right'});
+    text('Tax', 354.6, 360, {align: 'right'});
+    text(money(tax), 468, 360, {align: 'right'});
+    text('Total', 354.6, 375, {bold: true, align: 'right'});
+    text(money(itemTotal), 468, 375, {bold: true, align: 'right'});
+    text('Payment Method', 354.6, 394, {bold: true, align: 'right'});
+    text(`Amount Paid Via ${emisor.metodoPago || 'DEBIT (Contactless)'}`, 354.6, 414, {align: 'right'});
+    text(money(itemTotal), 468, 414, {align: 'right'});
+    text(`•••• ${cardLast4}`, 354.6, 425, {align: 'right'});
+    text(emisor.codigoTerminal || '025039', 354.6, 436, {align: 'right'});
+
+    rule(482.78, 2);
+    try {
+      const barcodeTarget = {};
+      JsBarcode(barcodeTarget, reference.barcode, {format: 'CODE39', displayValue: false, margin: 0});
+      const bits = barcodeTarget.encodings?.map(encoding => encoding.data).join('') || '';
+      const moduleWidth = 0.5;
+      const barcodeWidth = bits.length * moduleWidth;
+      const barcodeX = (pageW - barcodeWidth) / 2;
+      doc.setFillColor(0, 0, 0);
+      let runStart = -1;
+      for (let index = 0; index <= bits.length; index += 1) {
+        if (bits[index] === '1' && runStart < 0) runStart = index;
+        if (bits[index] !== '1' && runStart >= 0) {
+          doc.rect(barcodeX + runStart * moduleWidth, 498.6, (index - runStart) * moduleWidth, 18, 'F');
+          runStart = -1;
+        }
+      }
+    } catch (error) {
+      console.warn('No se pudo generar el código de barras de la boleta 6:', error);
+    }
+    text(`* ${reference.barcode.split('').join(' ')} *`, pageW / 2, 525, {size: 6, align: 'center'});
+
+    rule(560.76, 2);
+    text(`Please debit my account •••• ${cardLast4} by ${money(itemTotal)} (Sale)`, 144, 587);
+    text(`Card Number: •••• ${cardLast4}`, 144, 598);
+    text(`Date/Time: ${transactionDate}`, 144, 609);
+    text(`Application ID: ${emisor.applicationId || 'A0000000042203'}`, 144, 620);
+    text(`Application PAN Sequence Number: ${emisor.applicationPanSequence || '00'}`, 144, 631);
+    text(`Device Id: ${emisor.deviceId || '0565'}`, 144, 643);
+    text(`Card Type: ${emisor.cardType || 'Debit'}`, 144, 654);
+    text(`TVR: ${emisor.tvr || '0000008001'}`, 144, 665);
+    text(`TSI: ${emisor.tsi || 'E800'}`, 144, 676);
+    text('No CVM', 144, 687);
+
+    rule(709.66);
+    text(emisor.policyUrl || 'https://www.apple.com/legal/sales-support/sales-policies/retail_us.html', pageW / 2, 731, {align: 'center'});
+    text(emisor.supportMessage || 'Learn how to set up your product and transfer your data from home at support.apple.com.', pageW / 2, 742, {align: 'center'});
+    rule(751.66);
+  };
+
+  ventasBoleta.forEach(renderReceiptPage);
+  return entregarPdf(doc, `BOLETA6-${nBoleta}.pdf`, output);
 }

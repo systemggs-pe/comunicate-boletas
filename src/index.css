@@ -140,7 +140,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .issuer-format-selector { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 20px; border-bottom: 1px solid var(--line); background: var(--paper-muted); }
 .issuer-format-selector p { margin: 3px 0 0; color: var(--muted); font-size: .75rem; }
 .issuer-format-selector .settings-selector-label { margin: 0; color: var(--ink); font-size: .82rem; font-weight: 760; }
-.issuer-format-options { display: flex; gap: 6px; }
+.issuer-format-options { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .issuer-format-option { display: inline-flex; min-height: 44px; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink-soft); font-size: .78rem; font-weight: 700; }
 .issuer-format-option span { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 5px; background: var(--paper-muted); font-family: "SF Mono", Consolas, monospace; font-size: .7rem; }
 .issuer-format-option[data-active="true"] { border-color: oklch(0.8 0.075 255); background: var(--blue-soft); color: var(--blue); }
@@ -157,6 +157,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .issuer-logo-preview img { display: block; width: 100%; height: 116px; object-fit: contain; background: var(--paper); }
 .issuer-logo-input { display: grid; gap: 6px; margin-top: 0 !important; }
 .issuer-logo-input input[type="file"] { min-height: 44px; padding: 8px; font-size: .72rem; }
+.issuer-logo-status { margin: 0; color: var(--blue); font-size: .72rem; font-weight: 700; line-height: 1.4; }
 .issuer-logo-error { margin: 0; color: var(--red); font-size: .7rem; font-weight: 680; line-height: 1.4; }
 .issuer-sensitive-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
 .issuer-basic-grid { display: grid; max-width: 720px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
@@ -276,6 +277,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .issuer-format-selector { display: grid; gap: 12px; padding: 15px 14px; }
   .issuer-format-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .issuer-format-option { min-width: 0; padding-inline: 9px; }
+  .issuer-format-option:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .issuer-section { padding: 20px 14px 24px; border-right: 0; border-bottom: 1px solid var(--line); }
   .issuer-section:last-child { border-bottom: 0; }
   .issuer-section-format4 { grid-column: auto; border-top: 0; }

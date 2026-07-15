@@ -31,6 +31,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [view, setView] = useState(getViewFromUrl);
   const [issuerConfig, setIssuerConfig] = useState(() => mergeBoletaExtranjeraEmisores());
+  const [issuerConfigLoading, setIssuerConfigLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [pendingView, setPendingView] = useState(null);
@@ -56,7 +57,8 @@ export default function App() {
     if (!user) return;
     obtenerConfiguracionBoleta()
       .then(result => setIssuerConfig(mergeBoletaExtranjeraEmisores(result.config)))
-      .catch(() => showToast('No se pudo cargar la configuración de emisores', 'error'));
+      .catch(() => showToast('No se pudo cargar la configuración de emisores', 'error'))
+      .finally(() => setIssuerConfigLoading(false));
   }, [user, showToast]);
 
   useEffect(() => {
@@ -126,7 +128,9 @@ export default function App() {
           <Suspense fallback={<div className="saas-empty py-12" role="status">Cargando módulo…</div>}>
             {view === 'boletas'
               ? <BoletaExtranjera boletaEmisoresConfig={issuerConfig} showToast={showToast}/>
-              : <EmisoresSettings key={JSON.stringify(issuerConfig)} config={issuerConfig} onSave={saveConfig} onDirtyChange={setSettingsDirty}/>
+              : issuerConfigLoading
+                ? <div className="saas-empty py-12" role="status">Cargando emisores…</div>
+                : <EmisoresSettings config={issuerConfig} onSave={saveConfig} onDirtyChange={setSettingsDirty}/>
             }
           </Suspense>
         </main>

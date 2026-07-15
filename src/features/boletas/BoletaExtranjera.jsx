@@ -2,9 +2,9 @@ import React, { useCallback, useState, useEffect, useRef } from 'react';
 import {Search, Edit, Printer, ScanBarcode, FileText} from '../../components/Icons.jsx';
 import {buscarVentasBoleta, consultarReniecDni, guardarBoletaExtranjera, listarBoletas} from '../../services/functionsClient.js';
 import { luhn } from '../../utils/imei.js';
-import { penToClp, formatClp } from '../../utils/currency.js';
+import {penToClp, penToUsd, formatClp, formatUsd} from '../../utils/currency.js';
 import { toLocalDatetimeValueBoleta } from '../../utils/dates.js';
-import {getBoletaExtranjeraEmisor} from '../../config/boletaExtranjera.js';
+import {getBoletaExtranjeraEmisorParaImpresion} from '../../config/boletaExtranjera.js';
 import { EscanerIA } from '../registros/EscanerIA.jsx';
 import {AccessibleDialog} from '../../components/AccessibleDialog.jsx';
 const limpiarParaFirestore = data => JSON.parse(JSON.stringify(data));
@@ -19,6 +19,8 @@ const FORMATOS_BOLETA = {
   2: {label: 'Térmica 80 mm', description: 'Impresora de 80 mm con PDF417'},
   3: {label: 'Pizarro #3', description: 'Formato Pizarro #3 con PDF417'},
   4: {label: 'Página completa', description: 'Documento de página completa con logo'},
+  5: {label: 'Marketplace A4', description: 'Boleta A4 con pedido, envío y artículos'},
+  6: {label: 'Apple Store', description: 'Recibo Letter estilo Apple Store'},
 };
 const historyDateFormatter = new Intl.DateTimeFormat('es-PE', {dateStyle: 'short', timeStyle: 'short'});
 
@@ -332,6 +334,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       historialId: opciones.historialId || null,
       guardarHistorial: opciones.guardarHistorial !== false,
       editando: Boolean(opciones.editando),
+      formatoOrigen: opciones.formatoOrigen ?? boletaData.formatoOrigen ?? null,
     });
   };
 
@@ -363,20 +366,21 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
     imprimiendoBoletaRef.current = true;
     setImprimiendoBoleta(true);
 
-    const emisorConfigurado = getBoletaExtranjeraEmisor(boletaEmisoresConfig, formato);
     const emisorGuardado = data.emisor || data.boletaData?.emisor || {};
+    const emisorSeleccionado = getBoletaExtranjeraEmisorParaImpresion(boletaEmisoresConfig, formato, {
+      formato: data.formatoOrigen,
+      emisor: emisorGuardado,
+    });
+    const totalPenBoleta = (data.ventas || []).reduce((sum, venta) => sum + Number(venta.precio || 0), 0);
     const boletaData = {
       cliente: data.cliente,
       ventas: data.ventas,
       equiposMap: data.equiposMap,
       totalClp: data.totalClp,
+      totalUsd: [4, 5, 6].includes(formato) ? penToUsd(totalPenBoleta, emisorSeleccionado.tipoCambioPenUsd) : 0,
       fechaHora: data.fechaHora,
       nBoleta: data.nBoleta || data.boletaData?.nBoleta || null,
-      emisor: {
-        ...emisorConfigurado,
-        ...emisorGuardado,
-        logoDataUrl: emisorGuardado.logoDataUrl || emisorConfigurado.logoDataUrl || '',
-      },
+      emisor: emisorSeleccionado,
     };
 
     try {
@@ -409,7 +413,9 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       if (formato === 1) await pdfModule.generarBoletaExtranjera(boletaData);
       else if (formato === 2) await pdfModule.generarBoletaExtranjera2(boletaData);
       else if (formato === 3) await pdfModule.generarBoletaExtranjera3(boletaData);
-      else await pdfModule.generarBoletaExtranjera4(boletaData);
+      else if (formato === 4) await pdfModule.generarBoletaExtranjera4(boletaData);
+      else if (formato === 5) await pdfModule.generarBoletaExtranjera5(boletaData);
+      else await pdfModule.generarBoletaExtranjera6(boletaData);
       showToast(data.guardarHistorial ? (data.historialId ? 'Boleta actualizada e impresa' : 'Boleta guardada e impresa') : 'Boleta reimpresa', 'success');
     } catch (error) {
       console.error(error);
@@ -570,6 +576,17 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
     }
   };
 
+  const totalUsdBoleta = boleta => {
+    const explicit = Number(boleta?.totalUsd || boleta?.boletaData?.totalUsd || 0);
+    if (explicit > 0) return explicit;
+    const totalPenGuardado = Number(boleta?.totalPen || 0) || (boleta?.boletaData?.ventas || [])
+      .reduce((sum, venta) => sum + Number(venta.precio || 0), 0);
+    const formato = Number(boleta?.formato || 4);
+    const rate = boleta?.boletaData?.emisor?.tipoCambioPenUsd
+      || boletaEmisoresConfig?.[`formato${formato}`]?.tipoCambioPenUsd;
+    return penToUsd(totalPenGuardado, rate);
+  };
+
   return (
     <div className="saas-boleta-page space-y-4">
       {/* Selección del tipo de boleta */}
@@ -613,7 +630,11 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                 <p className="mt-1 text-sm font-semibold text-slate-800">Equipo: {equipoPromptExistente}</p>
               )}
               <p className="mt-1 font-mono text-xs text-slate-600">IMEI {imeisPromptExistente || '-'}</p>
-              <p className="mt-2 text-xs font-semibold text-emerald-700">${formatClp(Number(boletaExistentePrompt.boleta.totalClp || 0))} CLP / S/. {Number(boletaExistentePrompt.boleta.totalPen || 0).toFixed(2)}</p>
+              <p className="mt-2 text-xs font-semibold text-emerald-700">
+                {[4, 5, 6].includes(Number(boletaExistentePrompt.boleta.formato))
+                  ? `${formatUsd(totalUsdBoleta(boletaExistentePrompt.boleta))} USD`
+                  : `$${formatClp(Number(boletaExistentePrompt.boleta.totalClp || 0))} CLP / S/. ${Number(boletaExistentePrompt.boleta.totalPen || 0).toFixed(2)}`}
+              </p>
             </div>
             <div className="mt-5 grid gap-2">
               <button type="button" onClick={() => editarBoletaExistente(boletaExistentePrompt.boleta)} className="saas-primary w-full" data-dialog-autofocus>
@@ -853,7 +874,9 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                           N.º {boleta.nBoleta || '-'} · DNI {boleta.clienteDni || '-'} · {boleta.fechaHora ? historyDateFormatter.format(new Date(boleta.fechaHora)) : 'Sin fecha'}
                         </p>
                         <p className="mt-1 text-xs font-semibold text-emerald-700">
-                          ${formatClp(Number(boleta.totalClp || 0))} CLP · S/. {Number(boleta.totalPen || 0).toFixed(2)}
+                          {[4, 5, 6].includes(Number(boleta.formato))
+                            ? `${formatUsd(totalUsdBoleta(boleta))} USD`
+                            : `$${formatClp(Number(boleta.totalClp || 0))} CLP · S/. ${Number(boleta.totalPen || 0).toFixed(2)}`}
                         </p>
                         <p className="history-imei mt-1 font-mono text-xs text-slate-500">
                           IMEI {imeisPreview || '-'}
@@ -889,7 +912,10 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => abrirSelectorFormato({...boleta.boletaData, nBoleta: boleta.nBoleta || boleta.boletaData?.nBoleta}, {historialId: boleta.id, guardarHistorial: false})}
+                          onClick={() => abrirSelectorFormato(
+                            {...boleta.boletaData, nBoleta: boleta.nBoleta || boleta.boletaData?.nBoleta},
+                            {historialId: boleta.id, guardarHistorial: false, formatoOrigen: boleta.formato},
+                          )}
                           className="saas-secondary"
                         >
                           <Printer size={15}/> Reimprimir

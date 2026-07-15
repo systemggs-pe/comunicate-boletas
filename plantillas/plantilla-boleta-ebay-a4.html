@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plantilla de boleta eBay A4</title>
+  <style>
+    @page { size: A4 portrait; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #eceff1; color: #101820; font-family: Arial, Helvetica, sans-serif; }
+    .toolbar {
+      position: sticky; top: 0; z-index: 2; display: flex; justify-content: center;
+      padding: 12px; background: #101820; color: white; font: 14px/1.4 Arial, sans-serif;
+    }
+    .toolbar button { min-height: 44px; padding: 0 18px; border: 0; border-radius: 6px; font: inherit; cursor: pointer; }
+    .page { position: relative; width: 210mm; height: 297mm; margin: 16px auto; overflow: hidden; background: white; }
+    [contenteditable="true"]:focus { outline: 2px solid #3665f3; outline-offset: 1px; }
+    .logo-slot {
+      position: absolute; left: 5.08mm; top: 2.71mm; width: 31.16mm; height: 12.53mm;
+      display: flex; align-items: center; overflow: hidden; white-space: nowrap;
+      font: 700 10.6mm/.9 Arial, Helvetica, sans-serif; letter-spacing: -1.7mm;
+    }
+    .logo-slot span:nth-child(1) { color: #e53238; }
+    .logo-slot span:nth-child(2) { color: #0064d2; }
+    .logo-slot span:nth-child(3) { color: #f5af02; }
+    .logo-slot span:nth-child(4) { color: #86b817; }
+    .column { position: absolute; top: 20.8mm; width: 56mm; font-size: 8.5pt; line-height: 1.38; }
+    .column h1 { margin: 0 0 3.7mm; font-size: 16pt; line-height: 1; }
+    .order-info { left: 5.3mm; }
+    .shipping { left: 65.5mm; }
+    .total { left: 125.3mm; width: 72.3mm; }
+    .info-row { display: grid; grid-template-columns: 27.8mm 1fr; margin-bottom: 1.45mm; }
+    .shipping-address { margin-top: 0; line-height: 1.5; }
+    .total-row { display: grid; grid-template-columns: 38.7mm 1fr; margin-bottom: 2.2mm; }
+    .free { color: #507c54; }
+    .total-rule { height: .35mm; margin: .6mm 0 2mm; border: 0; background: #101820; }
+    .total-row.strong { font-weight: 700; }
+    .legal { width: 57mm; margin-top: 4.6mm; font-size: 11pt; line-height: 1.28; }
+    .learn { display: inline-block; margin-top: 2mm; color: #0038a4; text-decoration: underline; }
+    .items-title { position: absolute; left: 5.3mm; top: 91.9mm; margin: 0; font-size: 16pt; line-height: 1; }
+    .order-number { position: absolute; left: 5.3mm; top: 101mm; font-size: 12.5pt; }
+    .items-table {
+      position: absolute; left: 5.3mm; top: 108.4mm; width: 192.3mm;
+      border-collapse: collapse; table-layout: fixed; font-size: 8.5pt;
+    }
+    .items-table th, .items-table td { border: .35mm solid #e8eaec; padding: 2mm 2mm; text-align: left; vertical-align: top; }
+    .items-table th { height: 7.7mm; padding-top: 2.2mm; background: #f9f9f9; font-weight: 700; }
+    .items-table .quantity { width: 19.8mm; }
+    .items-table .item { width: 100.6mm; }
+    .items-table .shipping-service { width: 35.1mm; }
+    .items-table .price { width: 36.8mm; }
+    .item-copy { display: grid; grid-template-columns: 35mm 1fr; gap: .2mm; line-height: 1.35; }
+    .imei { white-space: nowrap; }
+    .page-count { position: absolute; right: 5.3mm; bottom: 2.8mm; font-size: 8.5pt; color: #000; }
+    @media print {
+      html, body { background: white; }
+      .toolbar { display: none; }
+      .page { margin: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar"><button type="button" onclick="window.print()">Imprimir o guardar como PDF</button></div>
+  <main class="page">
+    <!-- Bloque exacto del logo del original: x 5.08 mm, y 2.71 mm, 31.16 x 12.53 mm. -->
+    <div class="logo-slot" aria-label="Logo" contenteditable="true"><span>e</span><span>b</span><span>a</span><span>y</span></div>
+
+    <section class="column order-info">
+      <h1>Order information</h1>
+      <div class="info-row"><span>Buyer</span><span contenteditable="true">YEMIL EDUARDO<br>JIMENEZ QUINCHO</span></div>
+      <div class="info-row"><span>Seller</span><span contenteditable="true">mobileusa</span></div>
+      <div class="info-row"><span>Placed on</span><span contenteditable="true">Feb 15, 2026</span></div>
+      <div class="info-row"><span>Payment method</span><span contenteditable="true">Debit Card</span></div>
+      <div class="info-row"><span>Paid on</span><span contenteditable="true">Feb 15, 2026</span></div>
+    </section>
+
+    <section class="column shipping">
+      <h1>Shipping address</h1>
+      <div class="shipping-address" contenteditable="true">9990 NW 14th St, Ste 110<br>Doral, Florida 33192-2702<br>United States</div>
+    </section>
+
+    <section class="column total">
+      <h1>Order total</h1>
+      <div class="total-row"><span contenteditable="true">1 item</span><span contenteditable="true">$ 250.00</span></div>
+      <div class="total-row"><span>Shipping</span><span class="free" contenteditable="true">Free</span></div>
+      <div class="total-row"><span>Tax*</span><span contenteditable="true">$ 25.00</span></div>
+      <hr class="total-rule">
+      <div class="total-row strong"><span>Order total</span><span contenteditable="true">$ 275.00</span></div>
+      <div class="legal">*We're required by law to collect sales tax and applicable fees for certain tax authorities.</div>
+      <span class="learn">Learn more</span>
+    </section>
+
+    <h2 class="items-title">Items bought from <span contenteditable="true">coloradoforsale</span></h2>
+    <div class="order-number">Order number: <span contenteditable="true">26-12838-58886</span></div>
+
+    <table class="items-table">
+      <thead>
+        <tr>
+          <th class="quantity">Quantity</th>
+          <th class="item">Item name</th>
+          <th class="shipping-service">Shipping service</th>
+          <th class="price">Item price</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td contenteditable="true">1</td>
+          <td><div class="item-copy"><span contenteditable="true">Xiaomi Redmi Note 15<br>Pro 4G 256gb</span><span class="imei" contenteditable="true">IMEI1: 861859082516920<br>IMEI2: 861859082516938</span></div></td>
+          <td></td>
+          <td contenteditable="true">$ 275.00</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="page-count">1/1</div>
+  </main>
+</body>
+</html>

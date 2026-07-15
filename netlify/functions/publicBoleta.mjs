@@ -76,6 +76,18 @@ function amountMatches(inputAmount, totals) {
   });
 }
 
+function format4UsdTotal(data = {}) {
+  const explicit = Number(data.totalUsd || data.boletaData?.totalUsd || 0);
+  if (explicit > 0) return Math.round(explicit * 100) / 100;
+  const boletaData = data.boletaData || {};
+  const totalPen = Number(data.totalPen || 0) || (Array.isArray(boletaData.ventas)
+    ? boletaData.ventas.reduce((sum, sale) => sum + Number(sale?.precio || 0), 0)
+    : 0);
+  const penPerUsd = Number(boletaData.emisor?.tipoCambioPenUsd || 3.75);
+  if (!(totalPen > 0) || !(penPerUsd > 0)) return 0;
+  return Math.round((totalPen / penPerUsd) * 100) / 100;
+}
+
 function parseLookupPayload(payload = {}) {
   const rut = normalizeRut(payload.rut);
   const nBoleta = normalizeBoletaNumber(payload.nBoleta);
@@ -98,16 +110,19 @@ function boletaMatchesLookup(data = {}, lookup) {
   const sameDate = [...lookup.fecha].some(key => storedDates.has(key));
   if (!sameDate) return false;
 
-  return amountMatches(lookup.monto, [
+  const totals = [
     data.totalClp,
     data.boletaData?.totalClp,
     data.totalPen,
-  ]);
+  ];
+  if ([4, 5, 6].includes(Number(data.formato || 1))) totals.push(format4UsdTotal(data));
+  return amountMatches(lookup.monto, totals);
 }
 
 function safeBoleta(doc) {
   const data = doc.data() || {};
   const boletaData = data.boletaData || {};
+  const totalUsd = [4, 5, 6].includes(Number(data.formato || 1)) ? format4UsdTotal(data) : 0;
 
   return {
     id: doc.id,
@@ -116,6 +131,7 @@ function safeBoleta(doc) {
     fechaHora: data.fechaHora || boletaData.fechaHora || '',
     totalClp: Number(data.totalClp || boletaData.totalClp || 0),
     totalPen: Number(data.totalPen || 0),
+    totalUsd,
     clienteNombre: String(data.clienteNombre || boletaData.cliente?.nombre || ''),
     boletaData: {
       cliente: {
@@ -127,6 +143,7 @@ function safeBoleta(doc) {
         ? boletaData.equiposMap
         : {},
       totalClp: Number(boletaData.totalClp || data.totalClp || 0),
+      totalUsd,
       fechaHora: boletaData.fechaHora || data.fechaHora || '',
       nBoleta: data.nBoleta || boletaData.nBoleta || null,
       emisor: boletaData.emisor || {},

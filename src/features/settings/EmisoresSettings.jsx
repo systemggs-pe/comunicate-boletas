@@ -1,12 +1,14 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Save} from '../../components/Icons.jsx';
-import {mergeBoletaExtranjeraEmisores} from '../../config/boletaExtranjera.js';
+import {guardarBoletaExtranjeraLogoLocal, mergeBoletaExtranjeraEmisores} from '../../config/boletaExtranjera.js';
 
 const FORMATOS = [
   {id: 1, label: 'Térmica 48 mm', description: 'Formato compacto para impresora térmica de 48 mm.'},
   {id: 2, label: 'Térmica 80 mm', description: 'Formato térmico de 80 mm con código PDF417.'},
   {id: 3, label: 'Pizarro #3', description: 'Formato Pizarro Villarreal #3 con código PDF417.'},
   {id: 4, label: 'Página completa', description: 'Documento de página completa con logo y datos empresariales.'},
+  {id: 5, label: 'Marketplace A4', description: 'Boleta A4 estilo marketplace con pedido, envío y detalle de artículos.'},
+  {id: 6, label: 'Apple Store', description: 'Recibo Letter estilo Apple Store con pago y código de barras.'},
 ];
 
 const REQUIRED_FIELDS = ['nombre', 'rut', 'direccion'];
@@ -49,15 +51,20 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
   const initialConfig = useMemo(() => mergeBoletaExtranjeraEmisores(config), [config]);
   const [form, setForm] = useState(initialConfig);
   const [savedForm, setSavedForm] = useState(initialConfig);
+  const formRef = useRef(initialConfig);
   const [activeFormat, setActiveFormat] = useState(1);
   const [saving, setSaving] = useState(false);
+  const [logoProcessing, setLogoProcessing] = useState(false);
   const [logoError, setLogoError] = useState('');
   const [saveError, setSaveError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
-  const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(savedForm), [form, savedForm]);
+  const dirty = useMemo(() => logoProcessing || JSON.stringify(form) !== JSON.stringify(savedForm), [form, logoProcessing, savedForm]);
 
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
 
   useEffect(() => {
     const warnBeforeUnload = event => {
@@ -76,10 +83,13 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
       delete next[`${format}-${field}`];
       return next;
     });
-    setForm(current => ({
+    const current = formRef.current;
+    const next = {
       ...current,
       [`formato${format}`]: {...current[`formato${format}`], [field]: value},
-    }));
+    };
+    formRef.current = next;
+    setForm(next);
   };
 
   const validate = () => {
@@ -88,6 +98,11 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
       REQUIRED_FIELDS.forEach(field => {
         if (!String(form[`formato${id}`]?.[field] || '').trim()) errors[`${id}-${field}`] = 'Este campo es obligatorio.';
       });
+    });
+    [4, 5, 6].forEach(format => {
+      if (!(Number(form[`formato${format}`]?.tipoCambioPenUsd) > 0)) {
+        errors[`${format}-tipoCambioPenUsd`] = 'Ingresa cuántos soles equivalen a 1 USD.';
+      }
     });
     setFieldErrors(errors);
     const firstKey = Object.keys(errors)[0];
@@ -121,17 +136,46 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
     }
   };
 
+  const guardarLogo = async (format, logoDataUrl) => {
+    guardarBoletaExtranjeraLogoLocal(format, logoDataUrl);
+    const currentForm = formRef.current;
+    const nextForm = {
+      ...currentForm,
+      [`formato${format}`]: {...currentForm[`formato${format}`], logoDataUrl},
+    };
+    formRef.current = nextForm;
+    setForm(nextForm);
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onSave(nextForm);
+      setSavedForm(nextForm);
+    } catch (error) {
+      console.error('Error al guardar el logo:', error);
+      setSaveError('El logo quedó pendiente. Usa “Guardar emisores” para volver a intentarlo.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const cambiarLogo = async event => {
     const file = event.target.files?.[0];
     if (!file) return;
     setLogoError('');
+    setLogoProcessing(true);
     try {
-      update(4, 'logoDataUrl', await prepararLogo(file));
+      await guardarLogo(activeFormat, await prepararLogo(file));
     } catch (error) {
       setLogoError(error.message || 'No se pudo preparar el logo.');
     } finally {
+      setLogoProcessing(false);
       event.target.value = '';
     }
+  };
+
+  const quitarLogo = async () => {
+    setLogoError('');
+    await guardarLogo(activeFormat, '');
   };
 
   const renderField = (format, field, label, options = {}) => {
@@ -167,7 +211,7 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
   const item = form[`formato${activeFormat}`];
 
   return (
-    <form className="saas-form-shell settings-shell" onSubmit={submit} noValidate aria-busy={saving}>
+    <form className="saas-form-shell settings-shell" onSubmit={submit} noValidate aria-busy={saving || logoProcessing}>
       <div className="issuer-format-selector" aria-label="Formato de impresión">
         <div>
           <p className="settings-selector-label">Formato de impresión</p>
@@ -189,10 +233,10 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
         </div>
       </div>
 
-      <fieldset className={`issuer-section ${activeFormat === 4 ? 'issuer-section-format4' : ''}`}>
+      <fieldset className={`issuer-section ${[4, 5].includes(activeFormat) ? 'issuer-section-format4' : ''}`}>
         <legend><span>{activeFormat}</span> {meta.label}</legend>
         <p className="issuer-description">{meta.description}</p>
-        {activeFormat === 4 ? (
+        {[4, 5].includes(activeFormat) ? (
           <div className="issuer-format4-grid">
             <div className="issuer-logo-editor">
               <div className="issuer-logo-preview">
@@ -200,26 +244,54 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
                   ? <img src={item.logoDataUrl} alt="Vista previa del logo" width="420" height="180"/>
                   : <span>Espacio del logo</span>}
               </div>
-              <label className="issuer-logo-input" htmlFor="issuer-logo">Agregar o cambiar logo
-                <input id="issuer-logo" name="issuer-logo" type="file" accept="image/png,image/jpeg,image/webp" onChange={cambiarLogo}/>
+              <label className="issuer-logo-input" htmlFor="issuer-logo">Agregar y guardar logo
+                <input id="issuer-logo" name="issuer-logo" type="file" accept="image/png,image/jpeg,image/webp" onChange={cambiarLogo} disabled={saving || logoProcessing}/>
               </label>
-              {item.logoDataUrl && <button type="button" className="saas-secondary" onClick={() => update(4, 'logoDataUrl', '')}>Quitar logo</button>}
+              {item.logoDataUrl && <button type="button" className="saas-secondary" onClick={quitarLogo} disabled={saving || logoProcessing}>Quitar logo</button>}
+              {logoProcessing && <p className="issuer-logo-status" role="status" aria-live="polite">Procesando y guardando logo…</p>}
               {logoError && <p className="issuer-logo-error" role="alert">{logoError}</p>}
             </div>
             <div className="issuer-sensitive-grid">
-              {renderField(4, 'nombre', 'Nombre o razón social', {required: true})}
-              {renderField(4, 'rut', 'Identificación fiscal', {required: true})}
-              {renderField(4, 'direccion', 'Dirección', {required: true})}
-              {renderField(4, 'ciudad', 'Ciudad, estado y código postal')}
-              {renderField(4, 'pais', 'País')}
-              {renderField(4, 'email', 'Correo', {type: 'email', inputMode: 'email'})}
-              {renderField(4, 'telefono', 'Teléfono', {type: 'tel', inputMode: 'tel'})}
-              {renderField(4, 'sitioWeb', 'Sitio web', {type: 'url', inputMode: 'url'})}
-              {renderField(4, 'metodoPago', 'Método de pago')}
-              {renderField(4, 'impuestoPorcentaje', 'Impuesto (%)', {type: 'number', inputMode: 'decimal', min: '0', max: '100', step: '0.01'})}
-              {renderField(4, 'notas', 'Notas', {multiline: true, wide: true})}
-              {renderField(4, 'terminos', 'Términos', {multiline: true, wide: true})}
+              {renderField(activeFormat, 'nombre', activeFormat === 5 ? 'Nombre del vendedor' : 'Nombre o razón social', {required: true})}
+              {renderField(activeFormat, 'rut', 'Identificación fiscal', {required: true})}
+              {renderField(activeFormat, 'direccion', activeFormat === 5 ? 'Dirección de envío' : 'Dirección', {required: true})}
+              {renderField(activeFormat, 'ciudad', 'Ciudad, estado y código postal')}
+              {renderField(activeFormat, 'pais', 'País')}
+              {activeFormat === 5 && renderField(5, 'vendedor', 'Vendedor de los artículos')}
+              {activeFormat === 4 && renderField(4, 'email', 'Correo', {type: 'email', inputMode: 'email'})}
+              {activeFormat === 4 && renderField(4, 'telefono', 'Teléfono', {type: 'tel', inputMode: 'tel'})}
+              {activeFormat === 4 && renderField(4, 'sitioWeb', 'Sitio web', {type: 'url', inputMode: 'url'})}
+              {renderField(activeFormat, 'metodoPago', 'Método de pago')}
+              {renderField(activeFormat, 'tipoCambioPenUsd', 'Tipo de cambio: PEN por 1 USD', {required: true, type: 'number', inputMode: 'decimal', min: '0.01', step: '0.01'})}
+              {renderField(activeFormat, 'impuestoPorcentaje', 'Impuesto (%)', {type: 'number', inputMode: 'decimal', min: '0', max: '100', step: '0.01'})}
+              {renderField(activeFormat, 'notas', 'Notas', {multiline: true, wide: true})}
+              {activeFormat === 4 && renderField(4, 'terminos', 'Términos', {multiline: true, wide: true})}
             </div>
+          </div>
+        ) : activeFormat === 6 ? (
+          <div className="issuer-sensitive-grid">
+            {renderField(6, 'nombre', 'Nombre de la tienda', {required: true})}
+            {renderField(6, 'rut', 'Identificación fiscal', {required: true})}
+            {renderField(6, 'direccion', 'Dirección', {required: true})}
+            {renderField(6, 'ciudad', 'Ciudad, estado y código postal')}
+            {renderField(6, 'email', 'Correo', {type: 'email', inputMode: 'email'})}
+            {renderField(6, 'telefono', 'Teléfono', {type: 'tel', inputMode: 'tel'})}
+            {renderField(6, 'sitioWeb', 'Sitio web')}
+            {renderField(6, 'metodoPago', 'Método de pago')}
+            {renderField(6, 'tipoCambioPenUsd', 'Tipo de cambio: PEN por 1 USD', {required: true, type: 'number', inputMode: 'decimal', min: '0.01', step: '0.01'})}
+            {renderField(6, 'impuestoPorcentaje', 'Impuesto (%)', {type: 'number', inputMode: 'decimal', min: '0', max: '100', step: '0.01'})}
+            {renderField(6, 'tarjetaUltimos4', 'Últimos 4 dígitos de tarjeta', {inputMode: 'numeric'})}
+            {renderField(6, 'codigoTerminal', 'Código de terminal')}
+            {renderField(6, 'applicationId', 'Application ID')}
+            {renderField(6, 'applicationPanSequence', 'PAN Sequence Number')}
+            {renderField(6, 'deviceId', 'Device ID')}
+            {renderField(6, 'cardType', 'Tipo de tarjeta')}
+            {renderField(6, 'tvr', 'TVR')}
+            {renderField(6, 'tsi', 'TSI')}
+            {renderField(6, 'diasDevolucion', 'Días para devolución', {type: 'number', inputMode: 'numeric', min: '0', step: '1'})}
+            {renderField(6, 'partNumber', 'Part Number predeterminado')}
+            {renderField(6, 'policyUrl', 'URL de políticas', {wide: true})}
+            {renderField(6, 'supportMessage', 'Mensaje de soporte', {multiline: true, wide: true})}
           </div>
         ) : (
           <div className="issuer-basic-grid">
@@ -234,7 +306,7 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
         <div className="settings-save-state" role="status" aria-live="polite">
           {saveError ? <span className="is-error">{saveError}</span> : dirty ? 'Cambios sin guardar' : 'Todo guardado'}
         </div>
-        <button className="saas-primary" type="submit" disabled={saving || !dirty}><Save size={17}/> {saving ? 'Guardando…' : 'Guardar emisores'}</button>
+        <button className="saas-primary" type="submit" disabled={saving || logoProcessing || !dirty}><Save size={17}/> {saving || logoProcessing ? 'Guardando…' : 'Guardar emisores'}</button>
       </div>
     </form>
   );
