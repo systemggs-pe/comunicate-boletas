@@ -509,3 +509,26 @@ test('format 6 follows the measured Letter receipt geometry and dynamic barcode'
   assert.equal(reference.barcode, '20231022R1681153706');
   assert.equal(reference.reference, 'R1681153706');
 });
+
+test('format 1 uses the 80 mm SII receipt layout with a real PDF417 stamp', async () => {
+  const source = await readFile(`${ROOT}/src/features/boletas/boletaPdf.js`, 'utf8');
+  const start = source.indexOf('export async function generarBoletaExtranjera({');
+  const end = source.indexOf('export async function generarBoletaExtranjera2', start);
+  const format1 = source.slice(start, end);
+
+  assert.match(format1, /const mmW = 80/);
+  assert.match(format1, /getPdf417Generator\(\)/);
+  assert.match(format1, /gen417\(texto417, 2, 4\)/);
+  assert.match(format1, /doc\.rect\(13, y, 54, 24\)/);
+  assert.match(format1, /BOLETA ELECTRÓNICA/);
+  assert.match(format1, /S\.I\.I\. -/);
+  assert.match(format1, /DATOS DEL CLIENTE/);
+  assert.match(format1, /detailField\('NOMBRE'/);
+  assert.match(format1, /detailField\('DNI \/ RUT'/);
+  assert.match(format1, /detailField\('EQUIPO'/);
+  assert.match(format1, /detailField\('COLOR'/);
+  assert.match(format1, /detailField\('MEMORIA'/);
+  assert.match(format1, /detailField\('IMEI'/);
+  assert.match(format1, /Timbre Electrónico SII/);
+  assert.doesNotMatch(format1, /CODE128/);
+});

@@ -3,6 +3,10 @@ export const DEFAULT_BOLETA_EXTRANJERA_EMISORES = {
     nombre: 'ROBERTO IGNACIO\nPIZARRO VILLAROEL',
     rut: '17.673.680 - 1',
     direccion: '18 DE SEPTIEMBRE #257\nLOCAL 68 - COM. SANTA BLANCA',
+    giro1: 'Venta de celulares, accesorios y equipos electrónicos',
+    giro2: '',
+    comuna: 'Arica',
+    ciudad: 'Arica',
   },
   formato2: {
     nombre: 'ALVARO JOSE PIZARRO VILLARROEL',

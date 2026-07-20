@@ -15,7 +15,7 @@ const MODOS = [
   {id: 'historial', label: 'Historial'},
 ];
 const FORMATOS_BOLETA = {
-  1: {label: 'Térmica 48 mm', description: 'Impresora térmica de 48 mm'},
+  1: {label: 'Térmica SII 80 mm', description: 'Ticket fiscal de 80 mm con PDF417'},
   2: {label: 'Térmica 80 mm', description: 'Impresora de 80 mm con PDF417'},
   3: {label: 'Pizarro #3', description: 'Formato Pizarro #3 con PDF417'},
   4: {label: 'Página completa', description: 'Documento de página completa con logo'},

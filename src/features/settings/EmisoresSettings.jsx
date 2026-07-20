@@ -3,7 +3,7 @@ import {Save} from '../../components/Icons.jsx';
 import {guardarBoletaExtranjeraLogoLocal, mergeBoletaExtranjeraEmisores} from '../../config/boletaExtranjera.js';
 
 const FORMATOS = [
-  {id: 1, label: 'Térmica 48 mm', description: 'Formato compacto para impresora térmica de 48 mm.'},
+  {id: 1, label: 'Térmica SII 80 mm', description: 'Formato fiscal de 80 mm con timbre PDF417.'},
   {id: 2, label: 'Térmica 80 mm', description: 'Formato térmico de 80 mm con código PDF417.'},
   {id: 3, label: 'Pizarro #3', description: 'Formato Pizarro Villarreal #3 con código PDF417.'},
   {id: 4, label: 'Página completa', description: 'Documento de página completa con logo y datos empresariales.'},
@@ -298,6 +298,10 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
             {renderField(activeFormat, 'nombre', 'Nombre o razón social', {required: true})}
             {renderField(activeFormat, 'rut', 'RUT', {required: true})}
             {renderField(activeFormat, 'direccion', 'Dirección fiscal', {required: true, multiline: true, rows: 3})}
+            {activeFormat === 1 && renderField(1, 'giro1', 'Giro o actividad principal')}
+            {activeFormat === 1 && renderField(1, 'giro2', 'Actividad secundaria')}
+            {activeFormat === 1 && renderField(1, 'comuna', 'Comuna')}
+            {activeFormat === 1 && renderField(1, 'ciudad', 'Oficina S.I.I. / ciudad')}
           </div>
         )}
       </fieldset>

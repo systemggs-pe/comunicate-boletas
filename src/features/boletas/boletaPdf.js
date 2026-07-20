@@ -61,7 +61,7 @@ function getBoletaVerificationUrl() {
   return `${window.location.origin.replace(/\/$/, '')}/boleta`;
 }
 
-export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, totalClp, fechaHora, nBoleta: numeroBoleta, emisor, output = 'download' }) {
+export async function generarBoletaExtranjeraLegacy48({ cliente, ventas, equiposMap, totalClp, fechaHora, nBoleta: numeroBoleta, emisor, output = 'download' }) {
   const {jsPDF, JsBarcode} = getPdfTools();
   const emisorInfo = emisor || getBoletaExtranjeraEmisor({}, 1);
   const verificationUrl = getBoletaVerificationUrl();
@@ -232,6 +232,201 @@ export async function generarBoletaExtranjera({ cliente, ventas, equiposMap, tot
   return entregarPdf(docFinal, nombre, output);
 }
 
+export async function generarBoletaExtranjera({cliente, ventas, equiposMap, totalClp, fechaHora, nBoleta: numeroBoleta, emisor, output = 'download'}) {
+  const {jsPDF} = getPdfTools();
+  const gen417 = await getPdf417Generator();
+  const emisorInfo = {...getBoletaExtranjeraEmisor({}, 1), ...(emisor || {})};
+  const verificationUrl = getBoletaVerificationUrl();
+  const mmW = 80;
+  const margin = 6;
+  const centerX = mmW / 2;
+  const font = 'helvetica';
+  const ventasBoleta = Array.isArray(ventas) && ventas.length ? ventas : [{}];
+  const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now()).slice(-7).padStart(7, '0');
+  const totalNum = Number.isFinite(Number(totalClp)) ? Number(totalClp) : 0;
+  const fecha = fechaHora ? new Date(fechaHora) : new Date();
+  const fechaValida = Number.isNaN(fecha.getTime()) ? new Date() : fecha;
+  const fechaTexto = new Intl.DateTimeFormat('es-CL', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(fechaValida).replace(/ de (\d{4})$/, ' del $1');
+  const money = value => Number(value || 0).toLocaleString('es-CL');
+  const oficinaSii = String(emisorInfo.ciudad || emisorInfo.comuna || 'ARICA').toUpperCase();
+  const giro = [emisorInfo.giro1, emisorInfo.giro2].filter(Boolean);
+  if (!giro.length) giro.push('Venta de celulares, accesorios y equipos electrónicos');
+
+  const totalPenItems = ventasBoleta.reduce((sum, venta) => sum + Number(venta.precio || 0), 0);
+  let totalAsignado = 0;
+  const detalles = ventasBoleta.map((venta, index) => {
+    const equipo = equiposMap?.[venta.imeiEquipo] || {};
+    const modelo = equipo.nombreComercial || venta.nombreComercial || venta.modeloEquipo || equipo.modelo || 'Venta';
+    const memoria = equipo.memoria || venta.memoria || '';
+    const color = equipo.color || venta.color || '';
+    const memoriaTexto = memoria && /\b(?:GB|TB|MB)\b/i.test(String(memoria)) ? String(memoria).toUpperCase() : memoria ? `${memoria}GB` : '-';
+    const itemTotal = index === ventasBoleta.length - 1
+      ? totalNum - totalAsignado
+      : Math.round(totalNum * Number(venta.precio || 0) / (totalPenItems || 1));
+    totalAsignado += itemTotal;
+    return {
+      modelo: [modelo, memoriaTexto !== '-' ? memoriaTexto : '', color].filter(Boolean).join(' '),
+      nombreEquipo: modelo,
+      memoria: memoriaTexto,
+      color: color || '-',
+      imei1: venta.imeiEquipo || '',
+      imei2: equipo.imei2 || venta.imei2Equipo || '',
+      total: itemTotal,
+    };
+  });
+
+  const fechaIso = `${fechaValida.getFullYear()}-${String(fechaValida.getMonth() + 1).padStart(2, '0')}-${String(fechaValida.getDate()).padStart(2, '0')}`;
+  const texto417 = [
+    nBoleta,
+    emisorInfo.rut,
+    cliente?.dni || '',
+    cliente?.nombre || '',
+    detalles.map(item => [item.modelo, item.imei1, item.imei2, item.total].filter(Boolean).join('|')).join(';'),
+    totalNum,
+    fechaIso,
+    'SII Res.99/2014',
+  ].join('|');
+  const pdf417Img = gen417(texto417, 2, 4);
+  const pdf417W = 62;
+  const pdf417H = 39;
+
+  const renderPDF = (doc, dibujar) => {
+    let y = 6;
+    const lineHeight = size => size * 0.36 + 1.05;
+    const setType = (size, bold = false) => {
+      doc.setFont(font, bold ? 'bold' : 'normal');
+      doc.setFontSize(size);
+      doc.setTextColor(20, 20, 20);
+    };
+    const centered = (value, size, bold = false, maxWidth = mmW - margin * 2) => {
+      setType(size, bold);
+      const lines = doc.splitTextToSize(String(value ?? ''), maxWidth);
+      if (dibujar) lines.forEach((line, index) => doc.text(line, centerX, y + index * lineHeight(size), {align: 'center'}));
+      y += lines.length * lineHeight(size);
+    };
+    const left = (value, size, bold = false, x = margin, maxWidth = mmW - margin - x) => {
+      setType(size, bold);
+      const lines = doc.splitTextToSize(String(value ?? ''), maxWidth);
+      if (dibujar) lines.forEach((line, index) => doc.text(line, x, y + index * lineHeight(size)));
+      y += lines.length * lineHeight(size);
+    };
+    const rule = (atY = y, width = 0.22) => {
+      if (dibujar) {
+        doc.setDrawColor(25, 25, 25);
+        doc.setLineWidth(width);
+        doc.line(margin, atY, mmW - margin, atY);
+      }
+    };
+    const detailField = (label, value, options = {}) => {
+      const size = options.imei ? 7.4 : 7;
+      const labelText = `${label}:`;
+      setType(size, true);
+      const labelWidth = doc.getTextWidth(labelText);
+      if (dibujar) doc.text(labelText, 11, y);
+      setType(size, options.imei);
+      const valueX = 11 + labelWidth + 1.4;
+      const lines = doc.splitTextToSize(String(value || '-'), mmW - margin - valueX);
+      if (dibujar) lines.forEach((line, index) => doc.text(line, valueX, y + index * lineHeight(size)));
+      y += Math.max(lines.length, 1) * lineHeight(size);
+    };
+
+    if (dibujar) {
+      doc.setDrawColor(25, 25, 25);
+      doc.setLineWidth(0.45);
+      doc.rect(13, y, 54, 24);
+    }
+    y += 6.1;
+    centered(`R.U.T.: ${emisorInfo.rut}`, 9, true, 50);
+    centered('BOLETA ELECTRÓNICA', 9.2, true, 50);
+    centered(`Nº ${nBoleta}`, 9.5, true, 50);
+    y = 34;
+    centered(`S.I.I. - ${oficinaSii}`, 8.8, true);
+    y += 4;
+
+    lineas(emisorInfo.nombre).forEach(linea => left(linea, 8.8, true, 9, 62));
+    giro.forEach(linea => left(linea, 7.8, false, 9, 62));
+    lineas(emisorInfo.direccion).forEach(linea => left(linea, 7.8, false, 9, 62));
+    y += 5;
+
+    setType(7.8, true);
+    if (dibujar) doc.text('Emisión', 9, y);
+    setType(7.8);
+    if (dibujar) doc.text(`: ${fechaTexto}`, 25, y);
+    y += 6;
+
+    rule(y);
+    y += 4.5;
+    left('DATOS DEL CLIENTE', 7.1, true, 9, 62);
+    detailField('NOMBRE', cliente?.nombre ? String(cliente.nombre).toUpperCase() : '-');
+    detailField('DNI / RUT', cliente?.dni || '-');
+    y += 3;
+
+    const itemX = 9;
+    const unitX = 47;
+    const qtyX = 57;
+    const totalX = 71;
+    rule(y);
+    y += 4.4;
+    setType(6.6);
+    if (dibujar) {
+      doc.text('Item', itemX, y);
+      doc.text('P. unitario', unitX, y, {align: 'right'});
+      doc.text('Cant.', qtyX, y, {align: 'center'});
+      doc.text('Total item', totalX, y, {align: 'right'});
+    }
+    y += 2.1;
+    rule(y);
+    y += 5;
+
+    detalles.forEach(item => {
+      setType(7.4);
+      if (dibujar) {
+        doc.text('Venta', itemX, y);
+        doc.text(money(item.total), unitX, y, {align: 'right'});
+        doc.text('1', qtyX, y, {align: 'center'});
+        doc.text(money(item.total), totalX, y, {align: 'right'});
+      }
+      y += 5.6;
+      detailField('EQUIPO', item.nombreEquipo);
+      detailField('COLOR', item.color);
+      detailField('MEMORIA', item.memoria);
+      detailField('IMEI', item.imei1 || '-', {imei: true});
+      if (item.imei2) detailField('IMEI 2', item.imei2, {imei: true});
+      y += 2.5;
+    });
+    rule(y);
+    y += 5;
+    setType(7.8, true);
+    if (dibujar) {
+      doc.text('Total $:', 57, y, {align: 'right'});
+      doc.text(money(totalNum), totalX, y, {align: 'right'});
+    }
+    y += 11;
+
+    if (dibujar) doc.addImage(pdf417Img, 'PNG', (mmW - pdf417W) / 2, y, pdf417W, pdf417H);
+    y += pdf417H + 4.2;
+    centered('Timbre Electrónico SII', 7.5, true);
+    centered('Res. 99 de 2014', 7.1);
+    centered('Verifique documento en sii.cl', 7.1);
+    y += 2;
+    centered('Corrobore autenticidad en:', 6.7, true);
+    centered(verificationUrl, 6.1, false, 68);
+    y += 6;
+
+    return Math.max(y, 168);
+  };
+
+  const docMedida = new jsPDF({unit: 'mm', format: [mmW, 260], orientation: 'portrait'});
+  const altoTotal = renderPDF(docMedida, false);
+  const docFinal = new jsPDF({unit: 'mm', format: [mmW, altoTotal], orientation: 'portrait'});
+  renderPDF(docFinal, true);
+
+  return entregarPdf(docFinal, `BOLETA-${nBoleta}.pdf`, output);
+}
 
 export async function generarBoletaExtranjera2({ cliente, ventas, equiposMap, totalClp, fechaHora, nBoleta: numeroBoleta, emisor, output = 'download' }) {
   const {jsPDF} = getPdfTools();
