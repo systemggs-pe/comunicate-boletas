@@ -110,7 +110,7 @@ export function BoletaPublicaPage() {
             {renderFieldError('fecha')}
           </label>
           <label htmlFor="public-monto">Monto total
-            <input id="public-monto" name="monto" inputMode="decimal" value={form.monto} onChange={e => updateField('monto', e.target.value)} placeholder="CLP, PEN o USD…" autoComplete="off" spellCheck="false" aria-invalid={Boolean(fieldErrors.monto)} aria-describedby={fieldErrors.monto ? 'public-monto-error' : undefined} required/>
+            <input id="public-monto" name="monto" inputMode="decimal" value={form.monto} onChange={e => updateField('monto', e.target.value)} placeholder="CLP" autoComplete="off" spellCheck="false" aria-invalid={Boolean(fieldErrors.monto)} aria-describedby={fieldErrors.monto ? 'public-monto-error' : undefined} required/>
             {renderFieldError('monto')}
           </label>
           <button className="saas-primary" type="submit" disabled={loading}><Search size={17}/> {loading ? 'Verificando…' : 'Verificar boleta'}</button>
