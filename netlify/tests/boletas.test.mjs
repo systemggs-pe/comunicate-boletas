@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
-import {__test, dispatchBoletas, DUPLICATE_QUERY_LIMIT, HISTORY_PAGE_SIZE, SALES_LOOKUP_LIMIT} from '../functions/boletas.mjs';
+import {__test, dispatchBoletas, DUPLICATE_QUERY_LIMIT, HISTORY_PAGE_SIZE, HISTORY_SEARCH_LIMIT, SALES_LOOKUP_LIMIT} from '../functions/boletas.mjs';
 import {
   getBoletaExtranjeraEmisorParaImpresion,
   guardarBoletaExtranjeraLogoLocal,
   mergeBoletaExtranjeraEmisores,
 } from '../../src/config/boletaExtranjera.js';
 import {penToUsd} from '../../src/utils/currency.js';
-import {crearReferenciaFormato6, formatearNumeroOrdenFormato5} from '../../src/features/boletas/boletaPdf.js';
+import {calcularTotalesEnterosThermer, crearReferenciaFormato6, formatearMontoEnteroThermer, formatearNumeroOrdenFormato5} from '../../src/features/boletas/boletaPdf.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -175,6 +175,42 @@ test('historial is paginated to 50 documents and never scans the full collection
   assert.equal(db.metrics.queryDocumentReads, 51);
 });
 
+test('history search finds exact matches by document, IMEI, or receipt number with bounded queries', async () => {
+  const imei = '123456789012345';
+  const seed = {
+    [`${basePath}/boletasExtranjeras/by-document`]: {
+      nBoleta: 41001,
+      clienteDni: 'CE0012345',
+      clienteNombre: 'CLIENTE CE',
+      clienteTipoDocumento: 'Carné de Extranjería',
+      boletaEquipoKey: imei,
+      boletaEquipoKeys: [imei],
+      createdAt: new Date('2026-08-31T14:00:00-05:00'),
+      boletaData: {cliente: {nombre: 'CLIENTE CE', dni: 'CE0012345', tipoDocumento: 'Carné de Extranjería'}},
+    },
+    [`${basePath}/boletasExtranjeras/other`]: {
+      nBoleta: 41002,
+      clienteDni: '12345678',
+      boletaEquipoKey: '987654321098765',
+      boletaEquipoKeys: ['987654321098765'],
+      createdAt: new Date('2026-08-30T14:00:00-05:00'),
+      boletaData: {},
+    },
+  };
+  const db = new FakeDb(seed);
+
+  const byDocument = await dispatchBoletas(db, {action: 'searchHistory', searchType: 'documento', query: 'ce 0012345'});
+  const byImei = await dispatchBoletas(db, {action: 'searchHistory', searchType: 'imei', query: imei});
+  const byNumber = await dispatchBoletas(db, {action: 'searchHistory', searchType: 'boleta', query: '41001'});
+
+  assert.equal(HISTORY_SEARCH_LIMIT, 50);
+  assert.deepEqual(byDocument.boletas.map(item => item.id), ['by-document']);
+  assert.deepEqual(byImei.boletas.map(item => item.id), ['by-document']);
+  assert.deepEqual(byNumber.boletas.map(item => item.id), ['by-document']);
+  assert.equal(byDocument.boletas[0].clienteTipoDocumento, 'Carné de Extranjería');
+  assert.ok(db.metrics.queries.every(query => query.limit <= HISTORY_SEARCH_LIMIT));
+});
+
 test('sales lookup reads only one client, matching sales, and their IMEIs', async () => {
   const dni = '12345678';
   const imeis = ['123456789012345', '987654321098765'];
@@ -211,6 +247,23 @@ test('sales lookup supports legacy numeric DNI values without adding reads to no
   assert.equal(result.ventas[0].dniCliente, dni);
   assert.equal(result.equipos.length, 1);
   assert.equal(db.metrics.queries.filter(query => query.path.endsWith('/ventas')).length, 2);
+});
+
+test('sales lookup accepts Carné de Extranjería and alphanumeric documents', async () => {
+  const documento = 'CE0012345';
+  const imei = '123456789012345';
+  const db = new FakeDb({
+    [`${basePath}/clientes/${documento}`]: {nombre: 'CLIENTE EXTRANJERO', tipoDocumento: 'Carné de Extranjería'},
+    [`${basePath}/ventas/ce-sale`]: {dniCliente: documento, imeiEquipo: imei, fecha: '2026-08-31', precio: '450'},
+    [`${basePath}/equipos/${imei}`]: {marca: 'SAMSUNG'},
+  });
+
+  const result = await __test.lookupSales(db, {dni: 'ce 0012345'});
+
+  assert.equal(result.cliente.dni, documento);
+  assert.equal(result.cliente.tipoDocumento, 'Carné de Extranjería');
+  assert.equal(result.ventas[0].id, 'ce-sale');
+  assert.equal(result.equipos[0].idEquipo, imei);
 });
 
 test('sales lookup falls back to the operational Ventas backend when the boletas project is empty', async () => {
@@ -261,7 +314,11 @@ test('the sales UI exposes the sale-receipt action and local development has an 
 
   assert.match(frontend, /Generar boleta de venta/);
   assert.match(frontend, /venta encontrada/);
+  assert.match(frontend, /DNI, CE, pasaporte o RUC/);
+  assert.match(frontend, /buscarBoletasHistorial/);
   assert.match(client, /operational-api\/api\/clientes/);
+  assert.match(client, /buscarBoletasHistorial/);
+  assert.match(client, /action: 'searchHistory'/);
   assert.match(viteConfig, /comunicate-registros-v2\.netlify\.app/);
 });
 
@@ -510,6 +567,62 @@ test('format 6 follows the measured Letter receipt geometry and dynamic barcode'
   assert.equal(reference.reference, 'R1681153706');
 });
 
+test('format 7 is independent and preserves the narrow thermal issuer fields', () => {
+  const payload = validPayload('123456789012348');
+  payload.formato = 7;
+  payload.boletaData.emisor = {
+    nombre: 'ROBERTO IGNACIO',
+    apellido: 'PIZARRO VILLAROEL',
+    rut: '77090342-4',
+    direccion: '18 DE SEPTIEMBRE #257',
+    local: 'LOCAL 68 - COM. SANTA BLANCA',
+    giro1: 'VENTA CELULARES ACCESORIOS',
+    ciudad: 'ARICA',
+    impuestoPorcentaje: '8',
+  };
+
+  const parsed = __test.normalizeBoletaPayload(payload);
+  assert.equal(parsed.formato, 7);
+  assert.equal(parsed.boletaData.totalUsd, 0);
+  assert.equal(parsed.boletaData.emisor.apellido, 'PIZARRO VILLAROEL');
+  assert.equal(parsed.boletaData.emisor.local, 'LOCAL 68 - COM. SANTA BLANCA');
+
+  const config = __test.normalizeConfig({formato7: payload.boletaData.emisor});
+  assert.equal(config.formato7.nombre, 'ROBERTO IGNACIO');
+  assert.equal(config.formato7.rut, '77090342-4');
+});
+
+test('format 7 follows the supplied 48 mm monospaced receipt reference', async () => {
+  const source = await readFile(`${ROOT}/src/features/boletas/boletaPdf.js`, 'utf8');
+  const start = source.indexOf('export async function generarBoletaExtranjera7');
+  const end = source.indexOf('export async function generarBoletaExtranjera({', start);
+  const format7 = source.slice(start, end);
+
+  assert.match(format7, /const mmW = 48/);
+  assert.match(format7, /const FONT = 'courier'/);
+  assert.match(format7, /format: 'CODE128'/);
+  assert.match(format7, /BOLETA ELECTRONICA N/);
+  assert.match(format7, /fila\('CLIENTE'/);
+  assert.match(format7, /fila\('SUB TOTAL'/);
+  assert.match(format7, /fila\('IVA'/);
+  assert.match(format7, /Esta boleta es indispensable/);
+  assert.match(format7, /Verifique esta boleta en:/);
+  assert.match(format7, /verificationUrl/);
+  assert.match(format7, /BOLETA7-/);
+  assert.doesNotMatch(format7, /PDF417/);
+});
+
+test('format 7 rounds to integer amounts while preserving the exact total', () => {
+  const amounts = calcularTotalesEnterosThermer(845000, 8);
+  assert.deepEqual(amounts, {total: 845000, subtotal: 782407, iva: 62593});
+  assert.equal(formatearMontoEnteroThermer(amounts.subtotal), '782,407');
+  assert.equal(formatearMontoEnteroThermer(amounts.iva), '62,593');
+  assert.equal(formatearMontoEnteroThermer(amounts.total), '845,000');
+  assert.deepEqual(calcularTotalesEnterosThermer(450.6, 8), {total: 451, subtotal: 418, iva: 33});
+  assert.deepEqual(calcularTotalesEnterosThermer(1000, 19), {total: 1000, subtotal: 840, iva: 160});
+  assert.deepEqual(calcularTotalesEnterosThermer('invalid', 8), {total: 0, subtotal: 0, iva: 0});
+});
+
 test('format 1 uses the 80 mm SII receipt layout with a real PDF417 stamp', async () => {
   const source = await readFile(`${ROOT}/src/features/boletas/boletaPdf.js`, 'utf8');
   const start = source.indexOf('export async function generarBoletaExtranjera({');
@@ -524,7 +637,7 @@ test('format 1 uses the 80 mm SII receipt layout with a real PDF417 stamp', asyn
   assert.match(format1, /S\.I\.I\. -/);
   assert.match(format1, /DATOS DEL CLIENTE/);
   assert.match(format1, /detailField\('NOMBRE'/);
-  assert.match(format1, /detailField\('DNI \/ RUT'/);
+  assert.match(format1, /detailField\('RUT'/);
   assert.match(format1, /detailField\('EQUIPO'/);
   assert.match(format1, /detailField\('COLOR'/);
   assert.match(format1, /detailField\('MEMORIA'/);

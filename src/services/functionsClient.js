@@ -52,26 +52,37 @@ export function listarBoletas(cursor = '') {
   return request('/api/boletas', {action: 'list', cursor}, true);
 }
 
-function mapOperationalSalesLookup(data, dni) {
-  const normalizedDni = String(dni || '').replace(/\D/g, '');
+export function buscarBoletasHistorial(searchType, query) {
+  return request('/api/boletas', {action: 'searchHistory', searchType, query}, true);
+}
+
+function normalizarDocumento(value) {
+  return String(value || '').trim().toUpperCase().replace(/[.\s]/g, '').replace(/[^A-Z0-9-]/g, '').slice(0, 20);
+}
+
+function mapOperationalSalesLookup(data, documento) {
+  const normalizedDocument = normalizarDocumento(documento);
   const clientes = Array.isArray(data?.clientes) ? data.clientes : [];
-  const source = clientes.find(cliente => String(cliente?.dni || cliente?.id || '').replace(/\D/g, '') === normalizedDni);
+  const source = clientes.find(cliente => normalizarDocumento(
+    cliente?.dni || cliente?.documento || cliente?.numeroDocumento || cliente?.id,
+  ) === normalizedDocument);
   if (!source) return {cliente: null, ventas: [], equipos: []};
   const ventas = Array.isArray(source.ventas) ? source.ventas : [];
   return {
     cliente: {
-      dni: normalizedDni,
-      nombre: source.nombre || ventas[0]?.nombreCliente || normalizedDni,
+      dni: normalizedDocument,
+      nombre: source.nombre || ventas[0]?.nombreCliente || normalizedDocument,
       celular: source.celular || ventas[0]?.celularCliente || '',
-      tipoDocumento: source.tipoDocumento || ventas[0]?.tipoDocumentoCliente || 'DNI',
+      tipoDocumento: source.tipoDocumento || ventas[0]?.tipoDocumentoCliente || 'Documento',
     },
-    ventas: ventas.map(venta => ({...venta, dniCliente: normalizedDni})),
+    ventas: ventas.map(venta => ({...venta, dniCliente: normalizedDocument})),
     equipos: Array.isArray(source.equipos) ? source.equipos : [],
   };
 }
 
-export async function buscarVentasBoleta(dni) {
-  const result = await request('/api/boletas', {action: 'lookupSales', dni}, true);
+export async function buscarVentasBoleta(documento) {
+  const normalizedDocument = normalizarDocumento(documento);
+  const result = await request('/api/boletas', {action: 'lookupSales', dni: normalizedDocument}, true);
   if (Array.isArray(result?.ventas) && result.ventas.length > 0) return result;
 
   // Durante `npm run dev`, la funcion publicada puede no incluir aun los cambios
@@ -79,11 +90,11 @@ export async function buscarVentasBoleta(dni) {
   if (import.meta.env.DEV) {
     const operational = await request('/operational-api/api/clientes', {
       action: 'queryOperational',
-      searchTerm: String(dni || '').replace(/\D/g, ''),
+      searchTerm: normalizedDocument,
       searchField: 'dni',
       limit: 1,
     }, true, '');
-    const mapped = mapOperationalSalesLookup(operational, dni);
+    const mapped = mapOperationalSalesLookup(operational, normalizedDocument);
     if (mapped.ventas.length > 0) return mapped;
   }
 

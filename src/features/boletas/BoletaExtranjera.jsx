@@ -1,6 +1,6 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import {Search, Edit, Printer, ScanBarcode, FileText} from '../../components/Icons.jsx';
-import {buscarVentasBoleta, consultarReniecDni, guardarBoletaExtranjera, listarBoletas} from '../../services/functionsClient.js';
+import {buscarBoletasHistorial, buscarVentasBoleta, consultarReniecDni, guardarBoletaExtranjera, listarBoletas} from '../../services/functionsClient.js';
 import { luhn } from '../../utils/imei.js';
 import {penToClp, penToUsd, formatClp, formatUsd} from '../../utils/currency.js';
 import { toLocalDatetimeValueBoleta } from '../../utils/dates.js';
@@ -8,7 +8,7 @@ import {getBoletaExtranjeraEmisorParaImpresion} from '../../config/boletaExtranj
 import { EscanerIA } from '../registros/EscanerIA.jsx';
 import {AccessibleDialog} from '../../components/AccessibleDialog.jsx';
 const limpiarParaFirestore = data => JSON.parse(JSON.stringify(data));
-const emptyForm = { nombre: '', rut: '', imei1: '', imei2: '', sn: '', marca: '', modelo: '', nombreComercial: '', memoria: '', color: '', precio: '' };
+const emptyForm = { nombre: '', tipoDocumento: 'DNI', rut: '', imei1: '', imei2: '', sn: '', marca: '', modelo: '', nombreComercial: '', memoria: '', color: '', precio: '' };
 const MODOS = [
   {id: 'buscar', label: 'Desde venta'},
   {id: 'nueva', label: 'Registro manual'},
@@ -21,8 +21,20 @@ const FORMATOS_BOLETA = {
   4: {label: 'Página completa', description: 'Documento de página completa con logo'},
   5: {label: 'Marketplace A4', description: 'Boleta A4 con pedido, envío y artículos'},
   6: {label: 'Apple Store', description: 'Recibo Letter estilo Apple Store'},
+  7: {label: 'Thermer', description: 'Ticket angosto como la referencia con código de barras'},
+};
+const TIPOS_DOCUMENTO = ['DNI', 'Carné de Extranjería', 'Pasaporte', 'RUC', 'Otro'];
+const HISTORY_SEARCH_OPTIONS = {
+  documento: {label: 'Documento', placeholder: 'DNI, CE, pasaporte o RUC'},
+  imei: {label: 'IMEI', placeholder: '15 dígitos del IMEI'},
+  boleta: {label: 'N.º de boleta', placeholder: 'Ej. 41903'},
 };
 const historyDateFormatter = new Intl.DateTimeFormat('es-PE', {dateStyle: 'short', timeStyle: 'short'});
+
+const normalizarDocumentoBoleta = value => String(value || '').trim().toUpperCase()
+  .replace(/[.\s]/g, '')
+  .replace(/[^A-Z0-9-]/g, '')
+  .slice(0, 20);
 
 const getModoFromUrl = () => {
   const mode = new URLSearchParams(window.location.search).get('mode');
@@ -148,7 +160,7 @@ const obtenerResumenEquipoBoleta = boleta => {
 };
 
 const crearBoletaDataDesdeForm = (form, fechaHora, totalClp) => ({
-  cliente: { nombre: form.nombre, dni: form.rut },
+  cliente: { nombre: form.nombre, dni: form.rut, tipoDocumento: form.tipoDocumento },
   ventas: [{
     imeiEquipo: form.imei1,
     imei2Equipo: form.imei2,
@@ -182,6 +194,7 @@ const formDesdeBoleta = boleta => {
   const equipo = data.equiposMap?.[imei1] || {};
   return {
     nombre: data.cliente?.nombre || boleta?.clienteNombre || '',
+    tipoDocumento: data.cliente?.tipoDocumento || boleta?.clienteTipoDocumento || 'DNI',
     rut: data.cliente?.dni || boleta?.clienteDni || '',
     imei1,
     imei2: normalizarImeiBoleta(equipo.imei2 || venta.imei2Equipo),
@@ -206,6 +219,11 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
   const [cargandoMas, setCargandoMas] = useState(false);
   const [cursorHistorial, setCursorHistorial] = useState('');
   const [hayMasHistorial, setHayMasHistorial] = useState(false);
+  const [historySearchType, setHistorySearchType] = useState('documento');
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [historySearchResults, setHistorySearchResults] = useState(null);
+  const [historySearchError, setHistorySearchError] = useState('');
+  const [buscandoHistorial, setBuscandoHistorial] = useState(false);
   const [imprimiendoBoleta, setImprimiendoBoleta] = useState(false);
   const [expandedHistoryId, setExpandedHistoryId] = useState('');
   const imprimiendoBoletaRef = useRef(false);
@@ -225,6 +243,49 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       setCargandoMas(false);
     }
   }, [showToast]);
+
+  const buscarHistorial = async event => {
+    event.preventDefault();
+    const rawQuery = historySearchQuery.trim();
+    let query = rawQuery;
+    let error = '';
+    if (historySearchType === 'documento') {
+      query = normalizarDocumentoBoleta(rawQuery);
+      if (query.length < 3) error = 'Ingresa un documento válido.';
+    } else if (historySearchType === 'imei') {
+      query = rawQuery.replace(/\D/g, '').slice(0, 15);
+      if (!/^\d{15}$/.test(query)) error = 'El IMEI debe tener 15 dígitos.';
+    } else {
+      query = rawQuery.replace(/\D/g, '');
+      if (!query || Number(query) <= 0) error = 'Ingresa un número de boleta válido.';
+    }
+
+    if (error) {
+      setHistorySearchError(error);
+      document.getElementById('history-search-query')?.focus();
+      return;
+    }
+
+    setBuscandoHistorial(true);
+    setHistorySearchError('');
+    setExpandedHistoryId('');
+    try {
+      const result = await buscarBoletasHistorial(historySearchType, query);
+      setHistorySearchResults(Array.isArray(result.boletas) ? result.boletas : []);
+    } catch (requestError) {
+      console.error('Error al buscar historial:', requestError);
+      setHistorySearchError('No se pudo buscar en el historial. Verifica tu conexión e inténtalo nuevamente.');
+    } finally {
+      setBuscandoHistorial(false);
+    }
+  };
+
+  const limpiarBusquedaHistorial = () => {
+    setHistorySearchQuery('');
+    setHistorySearchResults(null);
+    setHistorySearchError('');
+    setExpandedHistoryId('');
+  };
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -256,7 +317,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
   };
 
   // Modo buscar
-  const [searchDni, setSearchDni] = useState('');
+  const [searchDocumento, setSearchDocumento] = useState('');
   const [clienteEncontrado, setClienteEncontrado] = useState(null);
   const [ventasCliente, setVentasCliente] = useState([]);
   const [equipos, setEquipos] = useState([]);
@@ -265,10 +326,10 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
   const [searchError, setSearchError] = useState('');
 
   const buscar = async () => {
-    const dni = searchDni.trim();
-    if (!dni) {
-      setSearchError('Ingresa el DNI del cliente.');
-      document.getElementById('search-dni')?.focus();
+    const documento = normalizarDocumentoBoleta(searchDocumento);
+    if (documento.length < 3) {
+      setSearchError('Ingresa el documento del cliente.');
+      document.getElementById('search-documento')?.focus();
       return;
     }
 
@@ -279,10 +340,10 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
     setEquipos([]);
     setSeleccionadas(new Set());
     try {
-      const result = await buscarVentasBoleta(dni);
+      const result = await buscarVentasBoleta(documento);
       const vs = Array.isArray(result.ventas) ? result.ventas : [];
       const cliente = result.cliente;
-      if (!cliente && vs.length === 0) { setSearchError('No encontramos un cliente o una venta con ese DNI.'); return; }
+      if (!cliente && vs.length === 0) { setSearchError('No encontramos un cliente o una venta con ese documento.'); return; }
 
       if (vs.length === 0) showToast('Cliente encontrado, pero no tiene ventas registradas', 'error');
 
@@ -402,6 +463,9 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
             saved.boleta,
             ...current.filter(item => item.id !== saved.boleta.id),
           ]);
+          setHistorySearchResults(current => current
+            ? [saved.boleta, ...current.filter(item => item.id !== saved.boleta.id)]
+            : current);
         }
         if (data.historialId) setBoletaEnEdicion(null);
       } else if (!boletaData.nBoleta && data.nBoleta) {
@@ -415,7 +479,8 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       else if (formato === 3) await pdfModule.generarBoletaExtranjera3(boletaData);
       else if (formato === 4) await pdfModule.generarBoletaExtranjera4(boletaData);
       else if (formato === 5) await pdfModule.generarBoletaExtranjera5(boletaData);
-      else await pdfModule.generarBoletaExtranjera6(boletaData);
+      else if (formato === 6) await pdfModule.generarBoletaExtranjera6(boletaData);
+      else await pdfModule.generarBoletaExtranjera7(boletaData);
       showToast(data.guardarHistorial ? (data.historialId ? 'Boleta actualizada e impresa' : 'Boleta guardada e impresa') : 'Boleta reimpresa', 'success');
     } catch (error) {
       console.error(error);
@@ -450,7 +515,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
     const { name, value } = e.target;
     let v = value;
     if (['imei1','imei2'].includes(name)) v = v.replace(/\D/g,'').slice(0,15);
-    if (name === 'rut') v = v.replace(/\D/g,'').slice(0,8);
+    if (name === 'rut') v = normalizarDocumentoBoleta(v);
     if (['nombre','marca','modelo','nombreComercial','color'].includes(name)) v = v.toUpperCase();
     setForm(prev => ({ ...prev, [name]: v }));
     setFormErrors(current => {
@@ -461,7 +526,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
   };
 
   useEffect(() => {
-    if (form.rut.length !== 8) return;
+    if (form.tipoDocumento !== 'DNI' || !/^\d{8}$/.test(form.rut)) return;
 
     let activo = true;
     const buscarNombre = async () => {
@@ -494,7 +559,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
 
     buscarNombre();
     return () => { activo = false; };
-  }, [form.rut, showToast]);
+  }, [form.rut, form.tipoDocumento, showToast]);
 
   const onEscanerBoleta = (datos) => {
     setMostrarEscanerBoleta(false);
@@ -527,7 +592,11 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
   const emitirNueva = () => {
     const errors = {};
     if (!form.nombre.trim()) errors.nombre = 'Ingresa el nombre del cliente.';
-    if (!/^\d{8}$/.test(form.rut)) errors.rut = 'Ingresa un DNI de 8 dígitos.';
+    if (form.tipoDocumento === 'DNI' && !/^\d{8}$/.test(form.rut)) {
+      errors.rut = 'Ingresa un DNI de 8 dígitos.';
+    } else if (form.tipoDocumento !== 'DNI' && !/^(?=.*[A-Z0-9])[A-Z0-9-]{6,20}$/.test(form.rut)) {
+      errors.rut = 'Ingresa un documento válido de 6 a 20 caracteres.';
+    }
     if (!form.imei1) errors.imei1 = 'Ingresa el IMEI principal.';
     else if (!luhn(form.imei1)) errors.imei1 = 'El IMEI 1 no es válido. Verifica los 15 dígitos.';
     if (form.imei2 && !luhn(form.imei2)) errors.imei2 = 'El IMEI 2 no es válido. Verifica los 15 dígitos.';
@@ -586,6 +655,8 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       || boletaEmisoresConfig?.[`formato${formato}`]?.tipoCambioPenUsd;
     return penToUsd(totalPenGuardado, rate);
   };
+  const boletasHistorial = historySearchResults ?? historialBoletas;
+  const historySearchActive = historySearchResults !== null;
 
   return (
     <div className="saas-boleta-page space-y-4">
@@ -625,7 +696,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
         >
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
               <p className="font-semibold text-slate-900">{boletaExistentePrompt.boleta.clienteNombre || 'Cliente sin nombre'}</p>
-              <p className="mt-1 text-xs text-slate-500">Nro {boletaExistentePrompt.boleta.nBoleta || '-'} / DNI {boletaExistentePrompt.boleta.clienteDni || '-'}</p>
+              <p className="mt-1 text-xs text-slate-500">Nro {boletaExistentePrompt.boleta.nBoleta || '-'} / Documento {boletaExistentePrompt.boleta.clienteDni || '-'}</p>
               {equipoPromptExistente && (
                 <p className="mt-1 text-sm font-semibold text-slate-800">Equipo: {equipoPromptExistente}</p>
               )}
@@ -676,20 +747,20 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
           <section id="boleta-panel-buscar" className="workflow-panel workflow-flow" role="tabpanel" aria-labelledby="boleta-tab-buscar" aria-busy={buscandoVentas}>
             <div className="workflow-heading">
               <span>01</span>
-              <div><h2 id="search-sale-title">Buscar una venta</h2><p>Usa el DNI registrado para recuperar los equipos del cliente.</p></div>
+              <div><h2 id="search-sale-title">Buscar una venta</h2><p>Usa el documento registrado —DNI, CE, pasaporte o RUC— para recuperar los equipos.</p></div>
             </div>
             <div className="workflow-search">
-              <label className="sr-only" htmlFor="search-dni">DNI del cliente</label>
-              <input id="search-dni" name="searchDni" value={searchDni} onChange={e => { setSearchDni(e.target.value.replace(/\D/g,'').slice(0, 8)); setSearchError(''); }}
+              <label className="sr-only" htmlFor="search-documento">Documento del cliente</label>
+              <input id="search-documento" name="searchDocumento" value={searchDocumento} onChange={e => { setSearchDocumento(normalizarDocumentoBoleta(e.target.value)); setSearchError(''); }}
                 onKeyDown={e => e.key === 'Enter' && buscar()}
-                placeholder="DNI del cliente…" inputMode="numeric" autoComplete="off" spellCheck="false"
-                aria-invalid={Boolean(searchError)} aria-describedby={searchError ? 'search-dni-error' : undefined}
+                placeholder="DNI, CE, pasaporte o RUC…" autoCapitalize="characters" autoComplete="off" spellCheck="false"
+                aria-label="Documento del cliente" aria-invalid={Boolean(searchError)} aria-describedby={searchError ? 'search-documento-error' : undefined}
                 className="flex-1 min-w-0" />
               <button type="button" onClick={buscar} disabled={buscandoVentas} className="saas-primary disabled:cursor-not-allowed disabled:opacity-60">
                 <Search size={16}/> {buscandoVentas ? 'Buscando…' : 'Buscar venta'}
               </button>
             </div>
-            {searchError && <p className="field-error" id="search-dni-error" role="alert">{searchError}</p>}
+            {searchError && <p className="field-error" id="search-documento-error" role="alert">{searchError}</p>}
             {buscandoVentas && (
               <p className="text-xs text-blue-600" role="status" aria-live="polite">Consultando ventas del cliente…</p>
             )}
@@ -698,7 +769,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
               <>
                 <div className="bg-gray-50 rounded-lg p-3 border text-sm">
                   <p className="font-semibold text-gray-800">{clienteEncontrado.nombre}</p>
-                  <p className="text-gray-500 text-xs">DNI: {clienteEncontrado.dni} · {clienteEncontrado.celular || 'Sin celular'}</p>
+                  <p className="text-gray-500 text-xs">{clienteEncontrado.tipoDocumento || 'Documento'}: {clienteEncontrado.dni} · {clienteEncontrado.celular || 'Sin celular'}</p>
                 </div>
 
                 {ventasCliente.length === 0 ? (
@@ -769,10 +840,16 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
             <div className="grid grid-cols-2 gap-3">
               <div><label className="block text-xs text-gray-500 mb-1" htmlFor="manual-nombre">Nombre *</label><input {...fieldAccessibility('nombre')} name="nombre" value={form.nombre} onChange={handleFormChange} className="w-full border rounded p-2 text-sm" placeholder="Nombre completo…" autoComplete="name" required/>{fieldError('nombre')}</div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1" htmlFor="manual-rut">DNI *</label>
-                <input {...fieldAccessibility('rut')} name="rut" value={form.rut} onChange={handleFormChange} className="w-full border rounded p-2 text-sm font-mono" inputMode="numeric" autoComplete="off" spellCheck="false" required/>
+                <label className="block text-xs text-gray-500 mb-1" htmlFor="manual-tipoDocumento">Tipo de documento *</label>
+                <select id="manual-tipoDocumento" name="tipoDocumento" value={form.tipoDocumento} onChange={handleFormChange} className="w-full border rounded p-2 text-sm" required>
+                  {TIPOS_DOCUMENTO.map(tipo => <option key={tipo} value={tipo}>{tipo}</option>)}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 mb-1" htmlFor="manual-rut">N.º de documento *</label>
+                <input {...fieldAccessibility('rut')} name="rut" value={form.rut} onChange={handleFormChange} className="w-full border rounded p-2 text-sm font-mono" autoCapitalize="characters" autoComplete="off" spellCheck="false" required/>
                 {fieldError('rut')}
-                {buscandoReniecBoleta && <p className="text-xs text-blue-600 mt-1" role="status" aria-live="polite">Consultando DNI…</p>}
+                {buscandoReniecBoleta && <p className="text-xs text-blue-600 mt-1" role="status" aria-live="polite">Consultando DNI en RENIEC…</p>}
               </div>
             </div>
 
@@ -841,28 +918,73 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
         )}
 
         {modo === 'historial' && (
-          <section id="boleta-panel-historial" className="workflow-panel workflow-flow" role="tabpanel" aria-labelledby="boleta-tab-historial" aria-busy={cargandoHistorial || cargandoMas}>
+          <section id="boleta-panel-historial" className="workflow-panel workflow-flow" role="tabpanel" aria-labelledby="boleta-tab-historial" aria-busy={cargandoHistorial || cargandoMas || buscandoHistorial}>
             <div className="workflow-heading">
               <span>03</span>
-              <div><h2>Historial de boletas de venta</h2><p>Edita o vuelve a imprimir un documento ya emitido.</p></div>
+              <div><h2>Historial de boletas de venta</h2><p>Busca por documento, IMEI o número; luego edita o vuelve a imprimir.</p></div>
             </div>
-            {cargandoHistorial ? (
+            <form className="history-search" onSubmit={buscarHistorial} noValidate>
+              <label htmlFor="history-search-type">Buscar por
+                <select
+                  id="history-search-type"
+                  value={historySearchType}
+                  onChange={event => {
+                    setHistorySearchType(event.target.value);
+                    setHistorySearchQuery('');
+                    setHistorySearchResults(null);
+                    setHistorySearchError('');
+                  }}
+                >
+                  {Object.entries(HISTORY_SEARCH_OPTIONS).map(([value, option]) => <option key={value} value={value}>{option.label}</option>)}
+                </select>
+              </label>
+              <label className="history-search-value" htmlFor="history-search-query">Dato a buscar
+                <input
+                  id="history-search-query"
+                  value={historySearchQuery}
+                  onChange={event => {
+                    const value = historySearchType === 'documento'
+                      ? normalizarDocumentoBoleta(event.target.value)
+                      : event.target.value.replace(/\D/g, '').slice(0, historySearchType === 'imei' ? 15 : 12);
+                    setHistorySearchQuery(value);
+                    setHistorySearchError('');
+                  }}
+                  placeholder={HISTORY_SEARCH_OPTIONS[historySearchType].placeholder}
+                  inputMode={historySearchType === 'documento' ? 'text' : 'numeric'}
+                  autoCapitalize="characters"
+                  autoComplete="off"
+                  spellCheck="false"
+                  aria-invalid={Boolean(historySearchError)}
+                  aria-describedby={historySearchError ? 'history-search-error' : undefined}
+                />
+              </label>
+              <button type="submit" className="saas-primary" disabled={buscandoHistorial || cargandoHistorial}><Search size={16}/> {buscandoHistorial ? 'Buscando…' : 'Buscar'}</button>
+              {historySearchActive && <button type="button" className="saas-secondary" onClick={limpiarBusquedaHistorial} disabled={buscandoHistorial}>Limpiar</button>}
+            </form>
+            {historySearchError && <p className="field-error" id="history-search-error" role="alert">{historySearchError}</p>}
+            {historySearchActive && !buscandoHistorial && (
+              <p className="history-search-status" role="status" aria-live="polite">
+                {boletasHistorial.length} {boletasHistorial.length === 1 ? 'boleta encontrada' : 'boletas encontradas'}
+              </p>
+            )}
+            {cargandoHistorial && !historySearchActive ? (
               <div className="saas-empty py-10" role="status" aria-live="polite">
                 <p className="text-sm">Cargando historial…</p>
               </div>
-            ) : historialBoletas.length === 0 ? (
+            ) : boletasHistorial.length === 0 ? (
               <div className="saas-empty py-10">
                 <FileText size={40} strokeWidth={1.4} />
-                <p className="text-sm font-semibold">Sin boletas de venta guardadas</p>
-                <p className="text-xs">Las boletas de venta aparecerán aquí después de imprimirlas.</p>
+                <p className="text-sm font-semibold">{historySearchActive ? 'No encontramos boletas' : 'Sin boletas de venta guardadas'}</p>
+                <p className="text-xs">{historySearchActive ? 'Revisa el dato e intenta nuevamente.' : 'Las boletas de venta aparecerán aquí después de imprimirlas.'}</p>
               </div>
             ) : (
               <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-                {historialBoletas.map(boleta => {
+                {boletasHistorial.map(boleta => {
                   const equipoPreview = obtenerResumenEquipoBoleta(boleta);
                   const imeisPreview = resumirImeisBoleta(boleta);
                   const imeis = obtenerImeisBoletaGuardada(boleta);
                   const expanded = expandedHistoryId === boleta.id;
+                  const tipoDocumento = boleta.clienteTipoDocumento || boleta.boletaData?.cliente?.tipoDocumento || 'Documento';
                   return (
                     <div key={boleta.id} className="history-entry flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
@@ -871,7 +993,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                           <p className="history-equipment mt-1 text-sm font-semibold text-slate-800">{equipoPreview}</p>
                         )}
                         <p className="history-meta mt-0.5 text-xs text-slate-500">
-                          N.º {boleta.nBoleta || '-'} · DNI {boleta.clienteDni || '-'} · {boleta.fechaHora ? historyDateFormatter.format(new Date(boleta.fechaHora)) : 'Sin fecha'}
+                          N.º {boleta.nBoleta || '-'} · {tipoDocumento} {boleta.clienteDni || '-'} · {boleta.fechaHora ? historyDateFormatter.format(new Date(boleta.fechaHora)) : 'Sin fecha'}
                         </p>
                         <p className="mt-1 text-xs font-semibold text-emerald-700">
                           {[4, 5, 6].includes(Number(boleta.formato))
@@ -885,7 +1007,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                           <div className="history-details" id={`history-details-${boleta.id}`}>
                             <dl>
                               <div><dt>Cliente</dt><dd>{boleta.clienteNombre || 'Sin nombre'}</dd></div>
-                              <div><dt>DNI</dt><dd>{boleta.clienteDni || '-'}</dd></div>
+                              <div><dt>{tipoDocumento}</dt><dd>{boleta.clienteDni || '-'}</dd></div>
                               <div><dt>Equipo</dt><dd>{equipoPreview || 'Sin equipo'}</dd></div>
                               <div><dt>IMEI</dt><dd className="font-mono">{imeis.join(' / ') || '-'}</dd></div>
                             </dl>
@@ -924,7 +1046,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                     </div>
                   );
                 })}
-                {hayMasHistorial && (
+                {!historySearchActive && hayMasHistorial && (
                   <div className="flex justify-center px-4 py-4">
                     <button type="button" className="saas-secondary" disabled={cargandoMas} onClick={() => cargarHistorial(cursorHistorial, true)}>
                       {cargandoMas ? 'Cargando…' : 'Cargar 50 más'}

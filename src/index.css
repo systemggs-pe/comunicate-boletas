@@ -213,6 +213,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 
 .history-entry { content-visibility: auto; contain-intrinsic-size: 190px; }
 .history-name, .history-equipment, .history-imei { overflow-wrap: anywhere; }
+.history-search { display: grid; grid-template-columns: 170px minmax(220px, 1fr) auto auto; gap: 8px; align-items: end; }
+.history-search label { display: grid; gap: 5px; }
+.history-search-value { min-width: 0; }
+.history-search-status { margin: -10px 0 0; color: var(--muted); font-size: .75rem; font-weight: 680; }
 .history-details { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper-muted); }
 .history-details dl { display: grid; gap: 8px; margin: 0 0 12px; }
 .history-details dl div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }
@@ -267,6 +271,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .boleta-form-actions { position: sticky; bottom: calc(68px + env(safe-area-inset-bottom)); z-index: 20; display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); margin: 8px -14px -16px; padding: 12px 14px; background: oklch(0.972 0.008 84 / .97); box-shadow: 0 -1px 0 var(--line); backdrop-filter: blur(10px); }
   .boleta-form-actions button { min-width: 0; padding-inline: 10px; line-height: 1.2; }
   .history-entry { padding: 14px; }
+  .history-search { grid-template-columns: 1fr; }
+  .history-search :is(.saas-primary, .saas-secondary) { width: 100%; }
+  .history-search-status { margin-top: -4px; }
   .history-meta { overflow-wrap: anywhere; line-height: 1.45; }
   .history-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .history-actions button { width: 100%; min-width: 0; }

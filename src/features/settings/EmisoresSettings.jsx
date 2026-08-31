@@ -9,6 +9,7 @@ const FORMATOS = [
   {id: 4, label: 'Página completa', description: 'Documento de página completa con logo y datos empresariales.'},
   {id: 5, label: 'Marketplace A4', description: 'Boleta A4 estilo marketplace con pedido, envío y detalle de artículos.'},
   {id: 6, label: 'Apple Store', description: 'Recibo Letter estilo Apple Store con pago y código de barras.'},
+  {id: 7, label: 'Térmica angosta 48 mm', description: 'Ticket monoespaciado de 48 mm con S/N, IMEI y código de barras.'},
 ];
 
 const REQUIRED_FIELDS = ['nombre', 'rut', 'direccion'];
@@ -295,13 +296,16 @@ export function EmisoresSettings({config, onSave, onDirtyChange}) {
           </div>
         ) : (
           <div className="issuer-basic-grid">
-            {renderField(activeFormat, 'nombre', 'Nombre o razón social', {required: true})}
+            {renderField(activeFormat, 'nombre', activeFormat === 7 ? 'Nombre(s)' : 'Nombre o razón social', {required: true})}
+            {activeFormat === 7 && renderField(7, 'apellido', 'Apellidos')}
             {renderField(activeFormat, 'rut', 'RUT', {required: true})}
-            {renderField(activeFormat, 'direccion', 'Dirección fiscal', {required: true, multiline: true, rows: 3})}
-            {activeFormat === 1 && renderField(1, 'giro1', 'Giro o actividad principal')}
+            {renderField(activeFormat, 'direccion', activeFormat === 7 ? 'Dirección' : 'Dirección fiscal', {required: true, multiline: activeFormat !== 7, rows: 3})}
+            {activeFormat === 7 && renderField(7, 'local', 'Local / centro comercial')}
+            {[1, 7].includes(activeFormat) && renderField(activeFormat, 'giro1', 'Giro o actividad principal')}
             {activeFormat === 1 && renderField(1, 'giro2', 'Actividad secundaria')}
             {activeFormat === 1 && renderField(1, 'comuna', 'Comuna')}
-            {activeFormat === 1 && renderField(1, 'ciudad', 'Oficina S.I.I. / ciudad')}
+            {[1, 7].includes(activeFormat) && renderField(activeFormat, 'ciudad', 'Oficina S.I.I. / ciudad')}
+            {activeFormat === 7 && renderField(7, 'impuestoPorcentaje', 'IVA incluido (%)', {type: 'number', inputMode: 'decimal', min: '0', max: '100', step: '0.01'})}
           </div>
         )}
       </fieldset>

@@ -5,6 +5,7 @@ import {getAdminDb} from './_firebaseAdmin.mjs';
 const APP_ID = 'comunicate-pos';
 const SCOPE = 'shared';
 export const HISTORY_PAGE_SIZE = 50;
+export const HISTORY_SEARCH_LIMIT = 50;
 export const SALES_LOOKUP_LIMIT = 50;
 export const DUPLICATE_QUERY_LIMIT = 2;
 const OPERATIONAL_CLIENTS_URL = String(
@@ -19,10 +20,15 @@ function cleanText(value, max = 300) {
   return String(value || '').trim().slice(0, max);
 }
 
-function cleanDni(value) {
-  const dni = String(value || '').replace(/\D/g, '').slice(0, 12);
-  return /^\d{6,12}$/.test(dni) ? dni : '';
+function cleanDocument(value) {
+  const document = String(value || '').trim().toUpperCase()
+    .replace(/[.\s]/g, '')
+    .replace(/[^A-Z0-9-]/g, '')
+    .slice(0, 20);
+  return /^[A-Z0-9-]{3,20}$/.test(document) && /[A-Z0-9]/.test(document) ? document : '';
 }
+
+const cleanDni = cleanDocument;
 
 function cleanImei(value) {
   const imei = String(value || '').replace(/\D/g, '').slice(0, 15);
@@ -71,8 +77,10 @@ function normalizeEmisor(value) {
   const logoDataUrl = cleanText(emitter.logoDataUrl, 300000);
   return {
     nombre: cleanText(emitter.nombre, 180),
+    apellido: cleanText(emitter.apellido, 180),
     rut: cleanText(emitter.rut, 40),
     direccion: cleanText(emitter.direccion, 220),
+    local: cleanText(emitter.local, 160),
     giro1: cleanText(emitter.giro1, 120),
     giro2: cleanText(emitter.giro2, 120),
     comuna: cleanText(emitter.comuna, 80),
@@ -107,7 +115,7 @@ function normalizeBoletaPayload(payload) {
   const action = cleanText(payload?.action, 20);
   if (!['save', 'update'].includes(action)) throw Object.assign(new Error('ACTION_INVALIDA'), {status: 400});
   const formato = Number(payload.formato);
-  if (![1, 2, 3, 4, 5, 6].includes(formato)) throw Object.assign(new Error('FORMATO_INVALIDO'), {status: 400});
+  if (![1, 2, 3, 4, 5, 6, 7].includes(formato)) throw Object.assign(new Error('FORMATO_INVALIDO'), {status: 400});
 
   const raw = payload.boletaData || {};
   const ventas = normalizeVentas(raw.ventas);
@@ -128,7 +136,11 @@ function normalizeBoletaPayload(payload) {
   if (!fechaHora || Number.isNaN(Date.parse(fechaHora))) throw Object.assign(new Error('FECHA_INVALIDA'), {status: 400});
 
   const boletaData = {
-    cliente: {nombre: cleanText(raw.cliente?.nombre, 180), dni: cleanText(raw.cliente?.dni, 20)},
+    cliente: {
+      nombre: cleanText(raw.cliente?.nombre, 180),
+      dni: cleanDocument(raw.cliente?.dni),
+      tipoDocumento: cleanText(raw.cliente?.tipoDocumento || 'Documento', 30),
+    },
     ventas,
     equiposMap,
     totalClp: cleanMoney(raw.totalClp),
@@ -173,6 +185,7 @@ function safeBoleta(id, data = {}) {
     nBoleta: data.nBoleta || data.boletaData?.nBoleta || null,
     clienteDni: cleanText(data.clienteDni || data.boletaData?.cliente?.dni, 20),
     clienteNombre: cleanText(data.clienteNombre || data.boletaData?.cliente?.nombre, 180),
+    clienteTipoDocumento: cleanText(data.clienteTipoDocumento || data.boletaData?.cliente?.tipoDocumento || 'Documento', 30),
     totalPen: cleanMoney(data.totalPen),
     totalClp: cleanMoney(data.totalClp || data.boletaData?.totalClp),
     totalUsd: cleanMoney(data.totalUsd || data.boletaData?.totalUsd),
@@ -205,9 +218,65 @@ async function listBoletas(db, payload) {
   };
 }
 
+function historySearchInput(payload = {}) {
+  const searchType = cleanText(payload.searchType, 20);
+  if (!['documento', 'imei', 'boleta'].includes(searchType)) {
+    throw Object.assign(new Error('TIPO_BUSQUEDA_INVALIDO'), {status: 400});
+  }
+
+  if (searchType === 'documento') {
+    const value = cleanDocument(payload.query);
+    if (!value) throw Object.assign(new Error('DOCUMENTO_INVALIDO'), {status: 400});
+    return {searchType, value};
+  }
+  if (searchType === 'imei') {
+    const value = cleanImei(payload.query);
+    if (!value) throw Object.assign(new Error('IMEI_INVALIDO'), {status: 400});
+    return {searchType, value};
+  }
+
+  const value = Number(String(payload.query || '').replace(/\D/g, ''));
+  if (!Number.isInteger(value) || value <= 0) {
+    throw Object.assign(new Error('NUMERO_BOLETA_INVALIDO'), {status: 400});
+  }
+  return {searchType, value};
+}
+
+async function searchBoletas(db, payload) {
+  const {searchType, value} = historySearchInput(payload);
+  const ref = baseRef(db).collection('boletasExtranjeras');
+  let docs = [];
+
+  if (searchType === 'documento') {
+    const snap = await ref.where('clienteDni', '==', value).limit(HISTORY_SEARCH_LIMIT).get();
+    docs = snap.docs;
+  } else if (searchType === 'boleta') {
+    const snap = await ref.where('nBoleta', '==', value).limit(HISTORY_SEARCH_LIMIT).get();
+    docs = snap.docs;
+  } else {
+    const [keysSnap, primarySnap] = await Promise.all([
+      ref.where('boletaEquipoKeys', 'array-contains', value).limit(HISTORY_SEARCH_LIMIT).get(),
+      ref.where('boletaEquipoKey', '==', value).limit(HISTORY_SEARCH_LIMIT).get(),
+    ]);
+    docs = [...new Map([...keysSnap.docs, ...primarySnap.docs].map(doc => [doc.id, doc])).values()];
+  }
+
+  const sortableTime = doc => {
+    const data = doc.data() || {};
+    const createdAt = typeof data.createdAt?.toDate === 'function' ? data.createdAt.toDate() : new Date(data.createdAt || 0);
+    if (!Number.isNaN(createdAt.getTime())) return createdAt.getTime();
+    const fechaHora = new Date(data.fechaHora || data.boletaData?.fechaHora || 0);
+    return Number.isNaN(fechaHora.getTime()) ? 0 : fechaHora.getTime();
+  };
+  docs.sort((left, right) => sortableTime(right) - sortableTime(left));
+  return {boletas: docs.map(doc => safeBoleta(doc.id, doc.data())), searchType, query: value};
+}
+
 function mapOperationalLookup(data, dni) {
   const clientes = Array.isArray(data?.clientes) ? data.clientes : [];
-  const source = clientes.find(item => cleanDni(item?.dni || item?.id) === dni);
+  const source = clientes.find(item => cleanDocument(
+    item?.dni || item?.documento || item?.numeroDocumento || item?.id,
+  ) === dni);
   if (!source) return null;
   const ventas = Array.isArray(source.ventas)
     ? source.ventas.map(sale => ({...sale, dniCliente: dni}))
@@ -219,7 +288,7 @@ function mapOperationalLookup(data, dni) {
       dni,
       nombre: cleanText(source.nombre || ventas[0]?.nombreCliente || dni, 180),
       celular: cleanText(source.celular || ventas[0]?.celularCliente, 30),
-      tipoDocumento: cleanText(source.tipoDocumento || ventas[0]?.tipoDocumentoCliente || 'DNI', 30),
+      tipoDocumento: cleanText(source.tipoDocumento || ventas[0]?.tipoDocumentoCliente || 'Documento', 30),
     },
     ventas,
     equipos: Array.isArray(source.equipos) ? source.equipos : [],
@@ -251,8 +320,8 @@ async function lookupOperationalSales(dni, authorization, fetchImpl = fetch) {
 }
 
 async function lookupSales(db, payload, options = {}) {
-  const dni = cleanDni(payload.dni);
-  if (!dni) throw Object.assign(new Error('DNI_INVALIDO'), {status: 400});
+  const dni = cleanDocument(payload.dni);
+  if (!dni) throw Object.assign(new Error('DOCUMENTO_INVALIDO'), {status: 400});
   const base = baseRef(db);
   const [clientSnap, stringSalesSnap] = await Promise.all([
     base.collection('clientes').doc(dni).get(),
@@ -278,7 +347,7 @@ async function lookupSales(db, payload, options = {}) {
     dni,
     nombre: cleanText(clientData?.nombre || firstSale.nombreCliente || dni, 180),
     celular: cleanText(clientData?.celular || firstSale.celularCliente, 30),
-    tipoDocumento: cleanText(clientData?.tipoDocumento || firstSale.tipoDocumentoCliente || 'DNI', 30),
+    tipoDocumento: cleanText(clientData?.tipoDocumento || firstSale.tipoDocumentoCliente || 'Documento', 30),
   } : null;
   if (ventas.length) return {cliente, ventas, equipos};
 
@@ -288,7 +357,7 @@ async function lookupSales(db, payload, options = {}) {
 
 function normalizeConfig(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  return Object.fromEntries([1, 2, 3, 4, 5, 6]
+  return Object.fromEntries([1, 2, 3, 4, 5, 6, 7]
     .filter(format => source[`formato${format}`])
     .map(format => [`formato${format}`, normalizeEmisor(source[`formato${format}`])]));
 }
@@ -378,6 +447,7 @@ async function saveBoleta(db, payload) {
       nBoleta,
       clienteDni: boletaData.cliente.dni,
       clienteNombre: boletaData.cliente.nombre,
+      clienteTipoDocumento: boletaData.cliente.tipoDocumento,
       totalPen: parsed.totalPen,
       totalClp: boletaData.totalClp,
       totalUsd: boletaData.totalUsd,
@@ -408,6 +478,7 @@ async function saveBoleta(db, payload) {
 export async function dispatchBoletas(db, body, options = {}) {
   const action = cleanText(body?.action, 30);
   if (action === 'list') return listBoletas(db, body);
+  if (action === 'searchHistory') return searchBoletas(db, body);
   if (action === 'lookupSales') return lookupSales(db, body, options);
   if (action === 'getConfig') return getConfig(db);
   if (action === 'saveConfig') return saveConfig(db, body);
@@ -416,9 +487,12 @@ export async function dispatchBoletas(db, body, options = {}) {
 }
 
 export const __test = {
+  cleanDocument,
   cleanDni,
   cleanImei,
   listBoletas,
+  searchBoletas,
+  historySearchInput,
   lookupSales,
   lookupOperationalSales,
   mapOperationalLookup,

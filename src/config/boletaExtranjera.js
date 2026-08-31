@@ -73,6 +73,16 @@ export const DEFAULT_BOLETA_EXTRANJERA_EMISORES = {
     supportMessage: 'Learn how to set up your product and transfer your data from home at support.apple.com.',
     logoDataUrl: '',
   },
+  formato7: {
+    nombre: 'ROBERTO IGNACIO',
+    apellido: 'PIZARRO VILLAROEL',
+    rut: '77090342-4',
+    direccion: '18 DE SEPTIEMBRE #257',
+    local: 'LOCAL 68 - COM. SANTA BLANCA',
+    giro1: 'VENTA CELULARES ACCESORIOS',
+    ciudad: 'ARICA',
+    impuestoPorcentaje: '8',
+  },
 };
 
 const LOGOS_STORAGE_KEY = 'comunicate:boleta-emisores-logos:v1';

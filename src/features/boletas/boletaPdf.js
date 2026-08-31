@@ -61,36 +61,58 @@ function getBoletaVerificationUrl() {
   return `${window.location.origin.replace(/\/$/, '')}/boleta`;
 }
 
-export async function generarBoletaExtranjeraLegacy48({ cliente, ventas, equiposMap, totalClp, fechaHora, nBoleta: numeroBoleta, emisor, output = 'download' }) {
+export function calcularTotalesEnterosThermer(totalClp, impuestoPorcentaje = 8) {
+  const totalNumero = Number(totalClp);
+  const porcentajeNumero = Number(impuestoPorcentaje);
+  const total = Math.round(Number.isFinite(totalNumero) ? totalNumero : 0);
+  const porcentajeIva = Number.isFinite(porcentajeNumero) ? Math.max(0, porcentajeNumero) : 8;
+  const subtotal = porcentajeIva > 0 ? Math.round(total / (1 + porcentajeIva / 100)) : total;
+  return {total, subtotal, iva: total - subtotal};
+}
+
+export function formatearMontoEnteroThermer(value) {
+  return Math.round(Number(value) || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+    useGrouping: true,
+  });
+}
+
+export async function generarBoletaExtranjera7({cliente, ventas, equiposMap, totalClp, fechaHora, nBoleta: numeroBoleta, emisor, output = 'download'}) {
   const {jsPDF, JsBarcode} = getPdfTools();
-  const emisorInfo = emisor || getBoletaExtranjeraEmisor({}, 1);
+  const emisorInfo = {...getBoletaExtranjeraEmisor({}, 7), ...(emisor || {})};
   const verificationUrl = getBoletaVerificationUrl();
   const mmW = 48;
   const FONT = 'courier';
-  // Courier es ancho, sin escala y con tamaños pequeños para que quepan en 48 mm.
-  const F = 1.0;
+  const ventasBoleta = Array.isArray(ventas) && ventas.length ? ventas : [{}];
+  const mapaEquipos = equiposMap && typeof equiposMap === 'object' ? equiposMap : {};
 
-  // Código de barras: S/N del primer equipo o IMEI.
-  const primerEq = equiposMap[ventas[0]?.imeiEquipo] || {};
-  const codigoBarras = primerEq.sn || ventas[0]?.imeiEquipo || '';
+  // El ticket de referencia imprime el S/N bajo un CODE128; el IMEI es el respaldo.
+  const primeraVenta = ventasBoleta[0] || {};
+  const primerEq = mapaEquipos[primeraVenta.imeiEquipo] || {};
+  const codigoBarras = primerEq.sn || primeraVenta.sn || primeraVenta.imeiEquipo || '';
+  const barcodeW = 30;
   let barcodeImg = null, barcodeH = 0;
   if (codigoBarras) {
     try {
       const c = document.createElement('canvas');
-      JsBarcode(c, codigoBarras, { format: 'CODE128', width: 2, height: 60, displayValue: true, fontSize: 16, margin: 6, background: '#ffffff', lineColor: '#000000' });
+      JsBarcode(c, codigoBarras, {format: 'CODE128', width: 2, height: 58, displayValue: true, fontSize: 16, margin: 5, background: '#ffffff', lineColor: '#000000'});
       barcodeImg = c.toDataURL('image/png');
-      barcodeH = (mmW - 6) * (c.height / c.width);
+      barcodeH = Math.min(12, Math.max(9, barcodeW * (c.height / c.width)));
     } catch (_) {}
   }
 
-  // Número de boleta automático (timestamp).
-  const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now()).slice(-4).padStart(4, '0');
+  const nBoleta = numeroBoleta ? String(numeroBoleta) : String(Date.now()).slice(-5).padStart(5, '0');
+  const ivaConfigurado = Number(emisorInfo.impuestoPorcentaje || 8);
+  const porcentajeIva = Number.isFinite(ivaConfigurado) ? Math.max(0, ivaConfigurado) : 8;
+  const {total, subtotal, iva} = calcularTotalesEnterosThermer(totalClp, porcentajeIva);
+  const monto = formatearMontoEnteroThermer;
 
   const renderPDF = (doc, dibujar) => {
     let y = 4;
     const cx  = mmW / 2;
     const M   = 2;
-    const F   = 1; // mismo factor que tickets de venta y registro
+    const F   = 1;
     const lh  = (sz) => sz * F * 0.42 + 1.0;
 
     const sep = () => {
@@ -111,8 +133,8 @@ export async function generarBoletaExtranjeraLegacy48({ cliente, ventas, equipos
       y += lh(sz) * lines.length;
     };
 
-    const tl = (text, sz) => {
-      doc.setFontSize(sz * F); doc.setFont(FONT, 'normal');
+    const tl = (text, sz, bold = false) => {
+      doc.setFontSize(sz * F); doc.setFont(FONT, bold ? 'bold' : 'normal');
       const lines = doc.splitTextToSize(String(text ?? ''), mmW - M * 2);
       if (dibujar) {
         lines.forEach((l, i) => doc.text(l, i === 0 ? M : M + 3, y + i * lh(sz)));
@@ -120,13 +142,14 @@ export async function generarBoletaExtranjeraLegacy48({ cliente, ventas, equipos
       y += lh(sz) * lines.length;
     };
 
-    const fila = (label, valor, sz = 6.5) => {
+    const fila = (label, valor, sz = 6.5, boldValue = false) => {
       doc.setFontSize(sz * F); doc.setFont(FONT, 'normal');
       const labelTxt = label + ': ';
       const lw    = doc.getTextWidth(labelTxt);
       const lines = doc.splitTextToSize(String(valor ?? ''), mmW - M - lw - M);
       if (dibujar) {
         doc.text(labelTxt, M, y);
+        doc.setFont(FONT, boldValue ? 'bold' : 'normal');
         lines.forEach((l, i) => doc.text(l, M + lw, y + i * lh(sz)));
       }
       y += lh(sz) * Math.max(lines.length, 1);
@@ -134,68 +157,65 @@ export async function generarBoletaExtranjeraLegacy48({ cliente, ventas, equipos
 
     const fecha = fechaHora ? new Date(fechaHora) : new Date();
     const pad = n => String(n).padStart(2, '0');
-    const fechaStr = `${pad(fecha.getDate())}/${pad(fecha.getMonth()+1)}/${fecha.getFullYear().toString().slice(2)}`;
+    const fechaStr = `${pad(fecha.getDate())}/${pad(fecha.getMonth()+1)}/${fecha.getFullYear()}`;
     const horaStr  = `${pad(fecha.getHours())}:${pad(fecha.getMinutes())}:${pad(fecha.getSeconds())}`;
 
-    // Cabecera centrada.
     y += 1;
-    tc(`R.U.T.  ${emisorInfo.rut}`, 7, true);
-    tc(`BOLETA ELECTRONICA NRO  ${nBoleta}`, 7, true);
-    tc('SII ARICA', 7, true);
+    tc(`R.U.T.  ${rutVendedor(emisorInfo.rut)}`, 7, true);
+    tc(`BOLETA ELECTRONICA N  ${nBoleta}`, 7, true);
+    tc(`SII ${String(emisorInfo.ciudad || 'ARICA').toUpperCase()}`, 7, true);
     y += 1;
     sep();
     y += 1;
 
-    // Datos de tienda.
-    lineas(emisorInfo.nombre).forEach(linea => tl(linea, 6.5));
-    tl('VENTA CELULARES ACCESORIOS', 6.5);
+    lineas(emisorInfo.apellido).forEach(linea => tl(linea.toUpperCase(), 6.5));
+    if (emisorInfo.local) tl(String(emisorInfo.local).toUpperCase(), 6.5);
+    lineas(emisorInfo.nombre).forEach(linea => tl(linea.toUpperCase(), 6.5));
+    tl(String(emisorInfo.giro1 || 'VENTA CELULARES ACCESORIOS').toUpperCase(), 6.5);
     lineas(emisorInfo.direccion).forEach(linea => tl(linea, 6.5));
     y += 1;
     sep();
     y += 2;
 
-    // Cliente y equipos.
-    if (cliente.nombre) fila('NOMBRE', cliente.nombre.toUpperCase(), 6.5);
-    if (cliente.dni)    fila('RUT',    cliente.dni, 6.5);
+    if (cliente?.nombre) fila('CLIENTE', cliente.nombre.toUpperCase(), 6.5);
+    if (cliente?.dni) fila('RUT ', cliente.dni, 6.5);
     y += 1;
 
-    ventas.forEach(v => {
-      const eq  = equiposMap[v.imeiEquipo] || {};
+    ventasBoleta.forEach(v => {
+      const eq  = mapaEquipos[v.imeiEquipo] || {};
       const mem = eq.memoria || v.memoria || '';
       const nom = eq.nombreComercial || v.nombreComercial || v.modeloEquipo || '';
-      // Nombre comercial y memoria, sin etiqueta.
-      tl(`${nom}${mem ? ' ' + mem + 'GB' : ''}`.trim(), 6.5);
+      const memTexto = mem && /\b(?:GB|TB|MB)\b/i.test(String(mem)) ? String(mem) : mem ? `${mem}GB` : '';
+      if (nom || memTexto) {
+        tl(`${nom}${memTexto ? ' ' + memTexto : ''}`.trim().toUpperCase(), 6.5, true);
+      }
       const color = eq.color || v.color || '';
       if (color) fila('COLOR', color, 6.5);
       fila('IMEI', v.imeiEquipo || '', 6.5);
-      if (eq.imei2) fila('IMEI', eq.imei2, 6.5);
+      const imei2 = eq.imei2 || v.imei2Equipo || '';
+      if (imei2) fila('IMEI', imei2, 6.5);
     });
 
     y += 1;
-    // SUB TOTAL e DESCUENTOS (izquierda)
-    const subClp = penToClp(ventas.reduce((s,v) => s + parseFloat(v.precio||0), 0));
-    fila('SUB TOTAL',        subClp.toLocaleString('es-CL'), 6.5);
-    fila('TOTAL DESCUENTOS', '0', 6.5);
+    fila('SUB TOTAL', monto(subtotal), 6.5);
+    fila('IVA', monto(iva), 6.5);
     y += 2;
 
-    // TOTAL grande alineado a la derecha
     if (dibujar) {
       doc.setFontSize(8 * F); doc.setFont(FONT, 'normal');
-      doc.text(`TOTAL:  $ ${totalClp.toLocaleString('es-CL')}`, mmW - M, y, { align: 'right' });
+      doc.text(`TOTAL: $ ${monto(total)}`, mmW - M, y, {align: 'right'});
     }
     y += lh(8) + 1;
     sep();
     y += 2;
 
-    // Código de barras centrado.
     if (barcodeImg) {
-      if (dibujar) doc.addImage(barcodeImg, 'PNG', 3, y, mmW - 6, barcodeH);
+      if (dibujar) doc.addImage(barcodeImg, 'PNG', (mmW - barcodeW) / 2, y, barcodeW, barcodeH);
       y += barcodeH + 2;
     }
     sep();
     y += 1;
 
-    // Fecha y hora.
     if (dibujar) {
       doc.setFontSize(6.5 * F); doc.setFont(FONT, 'normal');
       doc.text('FECHA', M, y);
@@ -209,15 +229,14 @@ export async function generarBoletaExtranjeraLegacy48({ cliente, ventas, equipos
     }
     y += lh(6.5) + 2;
 
-    // Pie centrado.
     tc('********************************', 5.5);
     tc('Esta boleta es indispensable', 6.5);
-    tc('para', 6.5);
+    tc('para', 6.5, true);
     tc('cambios y devoluciones.', 6.5);
     tc('********************************', 5.5);
     y += 1;
-    tc('Corrobore autenticidad en:', 5.8);
-    tc(verificationUrl, 5.4);
+    tc('Verifique esta boleta en:', 5.8, true);
+    tc(verificationUrl, 5.2);
     y += 4;
 
     return y;
@@ -228,7 +247,7 @@ export async function generarBoletaExtranjeraLegacy48({ cliente, ventas, equipos
   const docFinal  = new jsPDF({ unit: 'mm', format: [mmW, altoTotal], orientation: 'portrait' });
   renderPDF(docFinal, true);
 
-  const nombre = `BOLETA-${nBoleta}.pdf`;
+  const nombre = `BOLETA7-${nBoleta}.pdf`;
   return entregarPdf(docFinal, nombre, output);
 }
 
@@ -362,7 +381,7 @@ export async function generarBoletaExtranjera({cliente, ventas, equiposMap, tota
     y += 4.5;
     left('DATOS DEL CLIENTE', 7.1, true, 9, 62);
     detailField('NOMBRE', cliente?.nombre ? String(cliente.nombre).toUpperCase() : '-');
-    detailField('DNI / RUT', cliente?.dni || '-');
+    detailField('RUT', cliente?.dni || '-');
     y += 3;
 
     const itemX = 9;
@@ -512,7 +531,7 @@ export async function generarBoletaExtranjera2({ cliente, ventas, equiposMap, to
     tl('Venta', FS);
     nl(2);
     if (cliente.nombre) tl(`NOMBRE: ${cliente.nombre.toUpperCase()}`, FS);
-    if (cliente.dni)    tl(`RUT: ${cliente.dni}`, FS);
+    if (cliente.dni) tl(`RUT: ${cliente.dni}`, FS);
     nl(1);
     const prodStr = `${nombreComercial}${memoria ? ' ' + memoria + 'GB' : ''}`.trim();
     if (prodStr) tl(prodStr, FS);
@@ -767,7 +786,7 @@ export async function generarBoletaExtranjera3({ cliente, ventas, equiposMap, to
 
     section('CLIENTE');
     row('Sr@:', cliente?.nombre ? cliente.nombre.toUpperCase() : '');
-    row('Rut/CI:', cliente?.dni || '');
+    row('RUT:', cliente?.dni || '');
     y += 3;
 
     section('DETALLE');

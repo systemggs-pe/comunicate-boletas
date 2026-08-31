@@ -29,7 +29,7 @@ export function BoletaPublicaPage() {
   const submit = async event => {
     event.preventDefault();
     const errors = {};
-    if (!form.rut.trim()) errors.rut = 'Ingresa el RUT impreso en la boleta.';
+    if (!form.rut.trim()) errors.rut = 'Ingresa el documento impreso en la boleta.';
     if (!form.nBoleta.trim()) errors.nBoleta = 'Ingresa el número de boleta.';
     if (!form.fecha) errors.fecha = 'Selecciona la fecha impresa en la boleta.';
     if (!form.monto.trim() || Number(String(form.monto).replace(',', '.')) <= 0) errors.monto = 'Ingresa un monto total válido.';
@@ -74,14 +74,13 @@ export function BoletaPublicaPage() {
 
   const data = boleta?.boletaData || {};
   const emitter = data.emisor || {};
-  const isUsd = [4, 5, 6].includes(Number(boleta?.formato));
+  const formato = Number(boleta?.formato);
+  const isUsd = [4, 5, 6].includes(formato);
   const total = isUsd
     ? Number(boleta?.totalUsd || data.totalUsd || 0)
     : Number(boleta?.totalClp || data.totalClp || 0);
-  const taxPercent = isUsd ? Math.max(0, Number(emitter.impuestoPorcentaje || 0)) : 19;
-  const tax = isUsd
-    ? Math.round((total - total / (1 + taxPercent / 100)) * 100) / 100
-    : Math.round(total * 0.19 / 1.19);
+  const taxPercent = Math.max(0, Number(emitter.impuestoPorcentaje || (formato === 7 ? 8 : isUsd ? 0 : 19)));
+  const tax = Math.round((total - total / (1 + taxPercent / 100)) * 100) / 100;
   const subtotal = total - tax;
   const displayMoney = value => isUsd ? `${formatUsd(value)} USD` : `$${formatClp(value)} CLP`;
 
@@ -98,7 +97,7 @@ export function BoletaPublicaPage() {
           <p>Ingresa exactamente los datos impresos al final del documento.</p>
         </div>
         <form className="public-form" onSubmit={submit} noValidate aria-busy={loading}>
-          <label htmlFor="public-rut">RUT del cliente
+          <label htmlFor="public-rut">Documento del cliente
             <input id="public-rut" name="rut" value={form.rut} onChange={e => updateField('rut', e.target.value)} autoComplete="off" spellCheck="false" aria-invalid={Boolean(fieldErrors.rut)} aria-describedby={fieldErrors.rut ? 'public-rut-error' : undefined} required/>
             {renderFieldError('rut')}
           </label>
