@@ -1,11 +1,12 @@
 import React, {lazy, Suspense, useCallback, useEffect, useMemo, useState} from 'react';
-import {FileText, LogOut, Settings} from './components/Icons.jsx';
+import {LogOut} from './components/Icons.jsx';
 import {onAuthStateChanged, signOut} from 'firebase/auth';
 import {auth} from './lib/firebase.js';
 import {mergeBoletaExtranjeraEmisores} from './config/boletaExtranjera.js';
 import {obtenerConfiguracionBoleta, guardarConfiguracionBoleta} from './services/functionsClient.js';
 import {LoginScreen} from './features/auth/LoginScreen.jsx';
 import {AccessibleDialog} from './components/AccessibleDialog.jsx';
+import {MainNavigation} from './components/MainNavigation.jsx';
 
 const lazyNamed = (loader, name) => lazy(() => loader().then(module => ({default: module[name]})));
 const BoletaExtranjera = lazyNamed(() => import('./features/boletas/BoletaExtranjera.jsx'), 'BoletaExtranjera');
@@ -110,10 +111,6 @@ export default function App() {
             <button className="topbar-signout" type="button" onClick={() => signOut(auth)}><LogOut size={17}/> Salir</button>
           </div>
         </div>
-        <nav className="app-navigation" aria-label="Navegación principal">
-          <button type="button" data-active={view === 'boletas'} aria-current={view === 'boletas' ? 'page' : undefined} onClick={() => requestView('boletas')}><FileText size={19}/><strong>BOLETA DE VENTA</strong></button>
-          <button type="button" data-active={view === 'settings'} aria-current={view === 'settings' ? 'page' : undefined} onClick={() => requestView('settings')}><Settings size={19}/><strong>Emisores</strong></button>
-        </nav>
       </header>
       <div className="app-workspace">
         <header className="workspace-header">
@@ -135,10 +132,7 @@ export default function App() {
           </Suspense>
         </main>
       </div>
-      <nav className="mobile-navigation" aria-label="Navegación principal">
-        <button type="button" data-active={view === 'boletas'} aria-current={view === 'boletas' ? 'page' : undefined} onClick={() => requestView('boletas')}><FileText size={20}/><span>Boletas</span></button>
-        <button type="button" data-active={view === 'settings'} aria-current={view === 'settings' ? 'page' : undefined} onClick={() => requestView('settings')}><Settings size={20}/><span>Emisores</span></button>
-      </nav>
+      <MainNavigation currentView={view} onNavigate={requestView}/>
       {pendingView && (
         <AccessibleDialog
           title="Hay cambios sin guardar"

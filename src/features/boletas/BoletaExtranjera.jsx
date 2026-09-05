@@ -747,7 +747,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
           <section id="boleta-panel-buscar" className="workflow-panel workflow-flow" role="tabpanel" aria-labelledby="boleta-tab-buscar" aria-busy={buscandoVentas}>
             <div className="workflow-heading">
               <span>01</span>
-              <div><h2 id="search-sale-title">Buscar una venta</h2><p>Usa el documento registrado —DNI, CE, pasaporte o RUC— para recuperar los equipos.</p></div>
+              <div><h2 id="search-sale-title">Buscar una venta</h2><p>Usa el documento registrado: DNI, CE, pasaporte o RUC, para recuperar los equipos.</p></div>
             </div>
             <div className="workflow-search">
               <label className="sr-only" htmlFor="search-documento">Documento del cliente</label>
@@ -756,18 +756,18 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                 placeholder="DNI, CE, pasaporte o RUC…" autoCapitalize="characters" autoComplete="off" spellCheck="false"
                 aria-label="Documento del cliente" aria-invalid={Boolean(searchError)} aria-describedby={searchError ? 'search-documento-error' : undefined}
                 className="flex-1 min-w-0" />
-              <button type="button" onClick={buscar} disabled={buscandoVentas} className="saas-primary disabled:cursor-not-allowed disabled:opacity-60">
+              <button type="button" onClick={buscar} disabled={buscandoVentas} className="saas-primary">
                 <Search size={16}/> {buscandoVentas ? 'Buscando…' : 'Buscar venta'}
               </button>
             </div>
             {searchError && <p className="field-error" id="search-documento-error" role="alert">{searchError}</p>}
             {buscandoVentas && (
-              <p className="text-xs text-blue-600" role="status" aria-live="polite">Consultando ventas del cliente…</p>
+              <p className="ui-status" role="status" aria-live="polite"><span className="ui-spinner" />Consultando ventas del cliente…</p>
             )}
 
             {clienteEncontrado && (
               <>
-                <div className="bg-gray-50 rounded-lg p-3 border text-sm">
+                <div className="client-summary text-sm">
                   <p className="font-semibold text-gray-800">{clienteEncontrado.nombre}</p>
                   <p className="text-gray-500 text-xs">{clienteEncontrado.tipoDocumento || 'Documento'}: {clienteEncontrado.dni} · {clienteEncontrado.celular || 'Sin celular'}</p>
                 </div>
@@ -781,7 +781,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                       const eq = equipos.find(e => e.idEquipo === v.imeiEquipo) || {};
                       const clp = penToClp(v.precio);
                       return (
-                        <label key={v.id} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${seleccionadas.has(v.id) ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                        <label key={v.id} className="sale-option" data-selected={seleccionadas.has(v.id)}>
                           <input type="checkbox" checked={seleccionadas.has(v.id)} onChange={() => toggleVenta(v.id)} className="mt-0.5" />
                           <div className="flex-1 text-sm">
                             <p className="font-medium text-gray-800">{v.marcaEquipo} {eq.nombreComercial || v.nombreComercial || v.modeloEquipo}</p>
@@ -796,10 +796,10 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                 )}
 
                 {ventasSel.length > 0 && (
-                  <div className="sale-summary bg-green-50 border border-green-200 rounded-lg p-3 flex items-center justify-between">
+                  <div className="sale-summary">
                     <div>
                       <p className="text-xs text-gray-500">Total</p>
-                      <p className="font-bold text-green-700">${formatClp(totalClp)} CLP</p>
+                      <p><strong>${formatClp(totalClp)} CLP</strong></p>
                       <p className="text-xs text-gray-400">S/. {totalPen.toFixed(2)} PEN</p>
                     </div>
                     <button type="button" onClick={emitirDesdeVentas} className="saas-primary">
@@ -829,48 +829,50 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
             )}
 
             {boletaEnEdicion && (
-              <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm">
-                <p className="font-semibold text-amber-900">Editando boleta Nro {boletaEnEdicion.nBoleta || '-'}</p>
-                <p className="mt-1 text-xs font-medium text-amber-800">Los cambios se guardarán sobre esta boleta y luego se imprimirá el nuevo PDF.</p>
+              <div className="ui-status" data-tone="warning">
+                <div>
+                  <p className="font-semibold text-amber-900">Editando boleta Nro {boletaEnEdicion.nBoleta || '-'}</p>
+                  <p className="mt-1 text-xs font-medium text-amber-800">Los cambios se guardarán sobre esta boleta y luego se imprimirá el nuevo PDF.</p>
+                </div>
               </div>
             )}
 
             {/* Cliente */}
             <p className="form-section-title">Cliente</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs text-gray-500 mb-1" htmlFor="manual-nombre">Nombre *</label><input {...fieldAccessibility('nombre')} name="nombre" value={form.nombre} onChange={handleFormChange} className="w-full border rounded p-2 text-sm" placeholder="Nombre completo…" autoComplete="name" required/>{fieldError('nombre')}</div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1" htmlFor="manual-tipoDocumento">Tipo de documento *</label>
-                <select id="manual-tipoDocumento" name="tipoDocumento" value={form.tipoDocumento} onChange={handleFormChange} className="w-full border rounded p-2 text-sm" required>
+            <div className="form-grid">
+              <div className="ui-field"><label className="ui-field-label" htmlFor="manual-nombre">Nombre *</label><input {...fieldAccessibility('nombre')} name="nombre" value={form.nombre} onChange={handleFormChange} placeholder="Nombre completo…" autoComplete="name" required/>{fieldError('nombre')}</div>
+              <div className="ui-field">
+                <label className="ui-field-label" htmlFor="manual-tipoDocumento">Tipo de documento *</label>
+                <select id="manual-tipoDocumento" name="tipoDocumento" value={form.tipoDocumento} onChange={handleFormChange} required>
                   {TIPOS_DOCUMENTO.map(tipo => <option key={tipo} value={tipo}>{tipo}</option>)}
                 </select>
               </div>
-              <div className="col-span-2">
-                <label className="block text-xs text-gray-500 mb-1" htmlFor="manual-rut">N.º de documento *</label>
-                <input {...fieldAccessibility('rut')} name="rut" value={form.rut} onChange={handleFormChange} className="w-full border rounded p-2 text-sm font-mono" autoCapitalize="characters" autoComplete="off" spellCheck="false" required/>
+              <div className="ui-field wide">
+                <label className="ui-field-label" htmlFor="manual-rut">N.º de documento *</label>
+                <input {...fieldAccessibility('rut')} name="rut" value={form.rut} onChange={handleFormChange} className="font-mono" autoCapitalize="characters" autoComplete="off" spellCheck="false" required/>
                 {fieldError('rut')}
-                {buscandoReniecBoleta && <p className="text-xs text-blue-600 mt-1" role="status" aria-live="polite">Consultando DNI en RENIEC…</p>}
+                {buscandoReniecBoleta && <p className="ui-status" role="status" aria-live="polite"><span className="ui-spinner" />Consultando DNI en RENIEC…</p>}
               </div>
             </div>
 
             {/* Equipo */}
-            <div className="form-section-bar flex justify-between items-center border-b pb-1">
+            <div className="form-section-bar">
               <p className="form-section-title">Equipo</p>
               <button type="button" onClick={() => setMostrarEscanerBoleta(true)} className="saas-secondary">
                 <ScanBarcode size={13}/> Escanear caja
               </button>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="form-grid">
               {escaneoBoletaProcesando && (
-                <div className="col-span-2 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700" role="status" aria-live="polite">
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-300 border-t-blue-700" />
+                <div className="ui-status wide" role="status" aria-live="polite">
+                  <span className="ui-spinner" />
                   Extrayendo datos de la caja del equipo…
                 </div>
               )}
-              <div>
-                <label className="block text-xs text-gray-500 mb-1" htmlFor="manual-imei1">IMEI 1 *</label>
+              <div className="ui-field">
+                <label className="ui-field-label" htmlFor="manual-imei1">IMEI 1 *</label>
                 <input {...fieldAccessibility('imei1')} name="imei1" value={form.imei1} onChange={handleFormChange}
-                  className={`w-full border rounded p-2 text-sm font-mono ${form.imei1.length === 15 ? (luhn(form.imei1) ? 'border-green-400 bg-green-50' : 'border-red-400 bg-red-50') : ''}`} inputMode="numeric" autoComplete="off" spellCheck="false" required/>
+                  className={`font-mono ${form.imei1.length === 15 ? (luhn(form.imei1) ? 'border-green-400 bg-green-50' : 'border-red-400 bg-red-50') : ''}`} inputMode="numeric" autoComplete="off" spellCheck="false" required/>
                 {fieldError('imei1')}
                 {form.imei1.length === 15 && (
                   <p className={`text-xs mt-1 font-medium ${luhn(form.imei1) ? 'text-green-600' : 'text-red-600'}`}>
@@ -878,10 +880,10 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                   </p>
                 )}
               </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1" htmlFor="manual-imei2">IMEI 2</label>
+              <div className="ui-field">
+                <label className="ui-field-label" htmlFor="manual-imei2">IMEI 2</label>
                 <input {...fieldAccessibility('imei2')} name="imei2" value={form.imei2} onChange={handleFormChange}
-                  className={`w-full border rounded p-2 text-sm font-mono ${form.imei2.length === 15 ? (luhn(form.imei2) ? 'border-green-400 bg-green-50' : 'border-red-400 bg-red-50') : ''}`} inputMode="numeric" autoComplete="off" spellCheck="false"/>
+                  className={`font-mono ${form.imei2.length === 15 ? (luhn(form.imei2) ? 'border-green-400 bg-green-50' : 'border-red-400 bg-red-50') : ''}`} inputMode="numeric" autoComplete="off" spellCheck="false"/>
                 {fieldError('imei2')}
                 {form.imei2.length === 15 && (
                   <p className={`text-xs mt-1 font-medium ${luhn(form.imei2) ? 'text-green-600' : 'text-red-600'}`}>
@@ -889,24 +891,24 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                   </p>
                 )}
               </div>
-              <div><label className="block text-xs text-gray-500 mb-1" htmlFor="manual-sn">N.º de serie (S/N)</label><input {...fieldAccessibility('sn')} name="sn" value={form.sn} onChange={handleFormChange} className="w-full border rounded p-2 text-sm font-mono" autoComplete="off" spellCheck="false"/></div>
-              <div><label className="block text-xs text-gray-500 mb-1" htmlFor="manual-marca">Marca</label><input {...fieldAccessibility('marca')} name="marca" value={form.marca} onChange={handleFormChange} className="w-full border rounded p-2 text-sm" autoComplete="off"/></div>
-              <div><label className="block text-xs text-gray-500 mb-1" htmlFor="manual-nombreComercial">Nombre comercial</label><input {...fieldAccessibility('nombreComercial')} name="nombreComercial" value={form.nombreComercial} onChange={handleFormChange} className="w-full border rounded p-2 text-sm" autoComplete="off"/></div>
-              <div><label className="block text-xs text-gray-500 mb-1" htmlFor="manual-modelo">Modelo</label><input {...fieldAccessibility('modelo')} name="modelo" value={form.modelo} onChange={handleFormChange} className="w-full border rounded p-2 text-sm" autoComplete="off"/></div>
-              <div><label className="block text-xs text-gray-500 mb-1" htmlFor="manual-memoria">Memoria (GB)</label><input {...fieldAccessibility('memoria')} name="memoria" value={form.memoria} onChange={handleFormChange} className="w-full border rounded p-2 text-sm" inputMode="numeric" autoComplete="off"/></div>
-              <div><label className="block text-xs text-gray-500 mb-1" htmlFor="manual-color">Color</label><input {...fieldAccessibility('color')} name="color" value={form.color} onChange={handleFormChange} className="w-full border rounded p-2 text-sm" autoComplete="off"/></div>
+              <div className="ui-field"><label className="ui-field-label" htmlFor="manual-sn">N.º de serie (S/N)</label><input {...fieldAccessibility('sn')} name="sn" value={form.sn} onChange={handleFormChange} className="font-mono" autoComplete="off" spellCheck="false"/></div>
+              <div className="ui-field"><label className="ui-field-label" htmlFor="manual-marca">Marca</label><input {...fieldAccessibility('marca')} name="marca" value={form.marca} onChange={handleFormChange} autoComplete="off"/></div>
+              <div className="ui-field"><label className="ui-field-label" htmlFor="manual-nombreComercial">Nombre comercial</label><input {...fieldAccessibility('nombreComercial')} name="nombreComercial" value={form.nombreComercial} onChange={handleFormChange} autoComplete="off"/></div>
+              <div className="ui-field"><label className="ui-field-label" htmlFor="manual-modelo">Modelo</label><input {...fieldAccessibility('modelo')} name="modelo" value={form.modelo} onChange={handleFormChange} autoComplete="off"/></div>
+              <div className="ui-field"><label className="ui-field-label" htmlFor="manual-memoria">Memoria (GB)</label><input {...fieldAccessibility('memoria')} name="memoria" value={form.memoria} onChange={handleFormChange} inputMode="numeric" autoComplete="off"/></div>
+              <div className="ui-field"><label className="ui-field-label" htmlFor="manual-color">Color</label><input {...fieldAccessibility('color')} name="color" value={form.color} onChange={handleFormChange} autoComplete="off"/></div>
             </div>
 
             {/* Precio */}
-            <div>
-              <label className="block text-xs text-gray-500 mb-1" htmlFor="manual-precio">Precio (S/. PEN) *</label>
+            <div className="ui-field">
+              <label className="ui-field-label" htmlFor="manual-precio">Precio (S/. PEN) *</label>
               <input {...fieldAccessibility('precio')} name="precio" value={form.precio} onChange={handleFormChange} type="number" min="0.01" step="0.01" inputMode="decimal"
-                className="w-full border rounded p-2 text-sm font-bold text-green-700" autoComplete="off" required/>
+                className="font-bold text-green-700" autoComplete="off" required/>
               {fieldError('precio')}
               {form.precio && <p className="text-xs text-gray-500 mt-1">= <span className="font-semibold text-green-700">${formatClp(penToClp(form.precio))} CLP</span></p>}
             </div>
 
-            <div className="boleta-form-actions flex justify-between pt-2 border-t gap-3">
+            <div className="boleta-form-actions">
               <button type="button" onClick={() => { setFormErrors({}); boletaEnEdicion ? cancelarEdicionBoleta() : setForm({...emptyForm}); }} className="saas-secondary">
                 {boletaEnEdicion ? 'Cancelar edición' : 'Limpiar'}
               </button>
@@ -978,7 +980,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                 <p className="text-xs">{historySearchActive ? 'Revisa el dato e intenta nuevamente.' : 'Las boletas de venta aparecerán aquí después de imprimirlas.'}</p>
               </div>
             ) : (
-              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+              <div className="ui-list-surface divide-y divide-slate-100">
                 {boletasHistorial.map(boleta => {
                   const equipoPreview = obtenerResumenEquipoBoleta(boleta);
                   const imeisPreview = resumirImeisBoleta(boleta);
@@ -986,7 +988,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
                   const expanded = expandedHistoryId === boleta.id;
                   const tipoDocumento = boleta.clienteTipoDocumento || boleta.boletaData?.cliente?.tipoDocumento || 'Documento';
                   return (
-                    <div key={boleta.id} className="history-entry flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div key={boleta.id} className="history-entry ui-list-row flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <p className="history-name text-sm font-semibold text-slate-900">{boleta.clienteNombre || 'Cliente sin nombre'}</p>
                         {equipoPreview && (
