@@ -1,5 +1,5 @@
-import React, {lazy, Suspense, useCallback, useEffect, useMemo, useState} from 'react';
-import {LogOut} from './components/Icons.jsx';
+import React, {lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useState} from 'react';
+import {LogOut, Moon, Sun} from './components/Icons.jsx';
 import {onAuthStateChanged, signOut} from 'firebase/auth';
 import {auth} from './lib/firebase.js';
 import {mergeBoletaExtranjeraEmisores} from './config/boletaExtranjera.js';
@@ -17,6 +17,19 @@ const configuredEmails = String(import.meta.env.VITE_ALLOWED_EMAILS || 'brand050
   .split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
 
 const getViewFromUrl = () => new URLSearchParams(window.location.search).get('section') === 'emisores' ? 'settings' : 'boletas';
+const THEME_STORAGE_KEY = 'comunicate-theme';
+
+const getSystemTheme = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+
+const getInitialTheme = () => {
+  try {
+    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (storedTheme === 'dark' || storedTheme === 'light') return storedTheme;
+  } catch {
+    // Ignore storage failures and fall back to the system preference.
+  }
+  return getSystemTheme();
+};
 
 const writeViewToUrl = (view, replace = false) => {
   const url = new URL(window.location.href);
@@ -36,6 +49,8 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [pendingView, setPendingView] = useState(null);
+  const [theme, setTheme] = useState(getInitialTheme);
+  const darkMode = theme === 'dark';
 
   const showToast = useCallback((message, type = 'success') => {
     setToast({message, type, key: Date.now()});
@@ -46,6 +61,15 @@ export default function App() {
     const timer = window.setTimeout(() => setToast(null), 4200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // The selected theme still applies for the current session.
+    }
+  }, [theme]);
 
   useEffect(() => onAuthStateChanged(auth, async current => {
     const email = String(current?.email || '').toLowerCase();
@@ -108,6 +132,18 @@ export default function App() {
           <div className="app-brand"><strong>COMUNIC@TE</strong><span className="brand-product">BOLETA DE VENTA</span></div>
           <div className="account-actions">
             <span>{user.email}</span>
+            <button
+              className="theme-toggle"
+              type="button"
+              aria-label={darkMode ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+              aria-pressed={darkMode}
+              title={darkMode ? 'Modo claro' : 'Modo oscuro'}
+              onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}
+            >
+              <span className="theme-toggle__track" aria-hidden="true">
+                <span className="theme-toggle__thumb">{darkMode ? <Moon size={15}/> : <Sun size={15}/>}</span>
+              </span>
+            </button>
             <button className="topbar-signout" type="button" onClick={() => signOut(auth)}><LogOut size={17}/> Salir</button>
           </div>
         </div>

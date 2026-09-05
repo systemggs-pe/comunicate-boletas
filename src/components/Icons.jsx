@@ -6,7 +6,9 @@ function Icon({size = 20, className = '', children, ...props}) {
 
 export const FileText = props => <Icon {...props}><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h5"/></Icon>;
 export const LogOut = props => <Icon {...props}><path d="M10 4H5v16h5M14 8l4 4-4 4M18 12H9"/></Icon>;
+export const Moon = props => <Icon {...props}><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4a7 7 0 1 0 11.5 11.5z"/></Icon>;
 export const Settings = props => <Icon {...props}><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></Icon>;
+export const Sun = props => <Icon {...props}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></Icon>;
 export const LogIn = props => <Icon {...props}><path d="M14 4h5v16h-5M10 8l4 4-4 4M14 12H4"/></Icon>;
 export const ShieldCheck = props => <Icon {...props}><path d="M12 3l7 3v5c0 4.7-2.7 8-7 10-4.3-2-7-5.3-7-10V6z"/><path d="M9 12l2 2 4-4"/></Icon>;
 export const Building2 = props => <Icon {...props}><path d="M4 21V5l8-2v18M12 8h8v13M2 21h20M7 8h2M7 12h2M7 16h2M16 12h1M16 16h1"/></Icon>;
