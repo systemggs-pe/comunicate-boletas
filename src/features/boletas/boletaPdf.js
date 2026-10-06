@@ -61,6 +61,10 @@ function getBoletaVerificationUrl() {
   return `${window.location.origin.replace(/\/$/, '')}/boleta`;
 }
 
+function getPrintableUrl(url) {
+  return String(url || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+}
+
 export function calcularTotalesEnterosThermer(totalClp, impuestoPorcentaje = 8) {
   const totalNumero = Number(totalClp);
   const porcentajeNumero = Number(impuestoPorcentaje);
@@ -82,6 +86,7 @@ export async function generarBoletaExtranjera7({cliente, ventas, equiposMap, tot
   const {jsPDF, JsBarcode} = getPdfTools();
   const emisorInfo = {...getBoletaExtranjeraEmisor({}, 7), ...(emisor || {})};
   const verificationUrl = getBoletaVerificationUrl();
+  const verificationDisplayUrl = getPrintableUrl(verificationUrl);
   const mmW = 48;
   const FONT = 'courier';
   const ventasBoleta = Array.isArray(ventas) && ventas.length ? ventas : [{}];
@@ -236,7 +241,7 @@ export async function generarBoletaExtranjera7({cliente, ventas, equiposMap, tot
     tc('********************************', 5.5);
     y += 1;
     tc('Verifique esta boleta en:', 5.8, true);
-    tc(verificationUrl, 5.2);
+    tc(verificationDisplayUrl, 5.2);
     y += 4;
 
     return y;
@@ -256,6 +261,7 @@ export async function generarBoletaExtranjera({cliente, ventas, equiposMap, tota
   const gen417 = await getPdf417Generator();
   const emisorInfo = {...getBoletaExtranjeraEmisor({}, 1), ...(emisor || {})};
   const verificationUrl = getBoletaVerificationUrl();
+  const verificationDisplayUrl = getPrintableUrl(verificationUrl);
   const mmW = 80;
   const margin = 6;
   const centerX = mmW / 2;
@@ -433,7 +439,7 @@ export async function generarBoletaExtranjera({cliente, ventas, equiposMap, tota
     centered('Verifique documento en sii.cl', 7.1);
     y += 2;
     centered('Corrobore autenticidad en:', 6.7, true);
-    centered(verificationUrl, 6.1, false, 68);
+    centered(verificationDisplayUrl, 6.1, false, 68);
     y += 6;
 
     return Math.max(y, 168);
@@ -452,6 +458,7 @@ export async function generarBoletaExtranjera2({ cliente, ventas, equiposMap, to
   const gen417 = await getPdf417Generator();
   const emisorInfo = emisor || getBoletaExtranjeraEmisor({}, 2);
   const verificationUrl = getBoletaVerificationUrl();
+  const verificationDisplayUrl = getPrintableUrl(verificationUrl);
   const mmW  = 80;
   const M    = 5;
   const FONT = 'courier';
@@ -554,7 +561,7 @@ export async function generarBoletaExtranjera2({ cliente, ventas, equiposMap, to
     tl('Verifique documento en sii.cl', FS);
     nl(2);
     tl('Corrobore autenticidad en:', 7);
-    tl(verificationUrl, 7);
+    tl(verificationDisplayUrl, 7);
     tl('                               ', FS);
     tl('                               ', FS);
     nl(6);
@@ -574,6 +581,7 @@ export async function generarBoletaExtranjera3({ cliente, ventas, equiposMap, to
   const {jsPDF} = getPdfTools();
   const gen417 = await getPdf417Generator();
   const verificationUrl = getBoletaVerificationUrl();
+  const verificationDisplayUrl = getPrintableUrl(verificationUrl);
   const mmW = 80;
   const M = 5;
   const FONT = 'helvetica';
@@ -862,7 +870,7 @@ export async function generarBoletaExtranjera3({ cliente, ventas, equiposMap, to
     center('Verifique documento en sii.cl', 7.8);
     y += 1.5;
     center('Corrobore autenticidad en:', 7.4, true);
-    center(verificationUrl, 7);
+    center(verificationDisplayUrl, 7);
     y += 4;
 
     return Math.max(y, 188);
@@ -1036,7 +1044,7 @@ export async function generarBoletaExtranjera4({cliente, ventas, equiposMap, tot
   text(`Terms: ${fecha.getFullYear()} ${emisor.nombre || 'Company'}. ${emisor.terminos || ''}`, margin, y, 7.2, {color: 82});
 
   const verificationUrl = getBoletaVerificationUrl();
-  text(emisor.sitioWeb || verificationUrl, margin, pageH - 13, 7, {color: 68});
+  text(getPrintableUrl(emisor.sitioWeb || verificationUrl), margin, pageH - 13, 7, {color: 68});
   text('Documento generado por COMUNIC@TE', right, pageH - 13, 6.8, {align: 'right', color: 110});
 
   return entregarPdf(doc, `BOLETA4-${nBoleta}.pdf`, output);
