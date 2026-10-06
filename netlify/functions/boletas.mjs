@@ -1,4 +1,5 @@
 import admin from 'firebase-admin';
+import {receiptFingerprint, normalizeReceiptState} from './_receiptFingerprint.mjs';
 import {handlePost} from './_shared.mjs';
 import {getAdminDb} from './_firebaseAdmin.mjs';
 
@@ -180,7 +181,7 @@ function timestampIso(value) {
 }
 
 function safeBoleta(id, data = {}) {
-  return {
+  const receipt = {
     id,
     nBoleta: data.nBoleta || data.boletaData?.nBoleta || null,
     clienteDni: cleanText(data.clienteDni || data.boletaData?.cliente?.dni, 20),
@@ -197,7 +198,9 @@ function safeBoleta(id, data = {}) {
     boletaData: data.boletaData || {},
     createdAt: timestampIso(data.createdAt),
     updatedAt: timestampIso(data.updatedAt),
+    estado: normalizeReceiptState(data.estado),
   };
+  return {...receipt, receiptFingerprint: receiptFingerprint(receipt)};
 }
 
 async function listBoletas(db, payload) {
@@ -395,6 +398,28 @@ function duplicateError(imei, boletaId, nBoleta = null) {
   });
 }
 
+async function annulBoleta(db, payload) {
+  const id = String(payload.historialId || '').trim();
+  if (!id || id.length > 180 || id.includes('/')) throw Object.assign(new Error('BOLETA_ID_INVALIDO'), {status: 400});
+  const ref = baseRef(db).collection('boletasExtranjeras').doc(id);
+  return db.runTransaction(async transaction => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists) throw Object.assign(new Error('BOLETA_NOT_FOUND'), {status: 404});
+    transaction.set(ref, {estado: 'ANULADA', updatedAt: admin.firestore.FieldValue.serverTimestamp()}, {merge: true});
+    return {id, estado: 'ANULADA'};
+  });
+}
+
+function reusableReceipt(parsed, id, data) {
+  const state = normalizeReceiptState(data?.estado);
+  if (state !== 'ACTIVA') throw Object.assign(new Error(state === 'ANULADA' ? 'BOLETA_ANULADA' : 'BOLETA_LEGACY'), {status: 409});
+  try {
+    normalizeBoletaPayload({action: 'update', historialId: id, formato: data.formato, boletaData: data.boletaData});
+    if (!parsed.equipoKeys.every(key => equipmentKeys(data).includes(key))) throw new Error('MISMATCH');
+  } catch {throw Object.assign(new Error('BOLETA_EXISTENTE_INVALIDA'), {status: 409});}
+  return {id, reused: true, boleta: safeBoleta(id, data)};
+}
+
 async function saveBoleta(db, payload) {
   const parsed = normalizeBoletaPayload(payload);
   const base = baseRef(db);
@@ -408,7 +433,10 @@ async function saveBoleta(db, payload) {
   return db.runTransaction(async transaction => {
     const currentSnap = await transaction.get(boletaRef);
     if (isUpdate && !currentSnap.exists) throw Object.assign(new Error('BOLETA_NOT_FOUND'), {status: 404});
-    if (!isUpdate && currentSnap.exists) throw duplicateError(parsed.equipoKeys[0], boletaRef.id, currentSnap.data()?.nBoleta);
+    if (!isUpdate && currentSnap.exists) {
+      if (payload.reuseExisting === true) return reusableReceipt(parsed, boletaRef.id, currentSnap.data());
+      throw duplicateError(parsed.equipoKeys[0], boletaRef.id, currentSnap.data()?.nBoleta);
+    }
 
     const current = currentSnap.exists ? currentSnap.data() || {} : {};
     const oldKeys = equipmentKeys(current);
@@ -426,12 +454,20 @@ async function saveBoleta(db, payload) {
     for (const lockSnap of lockSnaps) {
       const owner = lockSnap.data()?.boletaId;
       if (lockSnap.exists && owner && owner !== boletaRef.id && parsed.equipoKeys.includes(lockSnap.id)) {
+        if (!isUpdate && payload.reuseExisting === true) {
+          const ownerSnap = await transaction.get(boletasRef.doc(owner));
+          if (!ownerSnap.exists) throw Object.assign(new Error('BOLETA_EXISTENTE_INVALIDA'), {status: 409});
+          return reusableReceipt(parsed, owner, ownerSnap.data());
+        }
         throw duplicateError(lockSnap.id, owner, lockSnap.data()?.nBoleta || null);
       }
     }
     for (let index = 0; index < legacySnapshots.length; index += 1) {
       const conflicting = legacySnapshots[index].docs.find(doc => doc.id !== boletaRef.id);
-      if (conflicting) throw duplicateError(parsed.equipoKeys[index], conflicting.id, conflicting.data()?.nBoleta || null);
+      if (conflicting) {
+        if (!isUpdate && payload.reuseExisting === true) return reusableReceipt(parsed, conflicting.id, conflicting.data());
+        throw duplicateError(parsed.equipoKeys[index], conflicting.id, conflicting.data()?.nBoleta || null);
+      }
     }
 
     let nBoleta = current.nBoleta || parsed.boletaData.nBoleta;
@@ -444,6 +480,7 @@ async function saveBoleta(db, payload) {
 
     const boletaData = {...parsed.boletaData, nBoleta};
     const data = {
+      ...(isUpdate ? (normalizeReceiptState(current.estado) ? {estado: current.estado} : {}) : {estado: 'ACTIVA'}),
       nBoleta,
       clienteDni: boletaData.cliente.dni,
       clienteNombre: boletaData.cliente.nombre,
@@ -477,6 +514,7 @@ async function saveBoleta(db, payload) {
 
 export async function dispatchBoletas(db, body, options = {}) {
   const action = cleanText(body?.action, 30);
+  if (action === 'annul') return annulBoleta(db, body);
   if (action === 'list') return listBoletas(db, body);
   if (action === 'searchHistory') return searchBoletas(db, body);
   if (action === 'lookupSales') return lookupSales(db, body, options);
@@ -501,6 +539,7 @@ export const __test = {
   normalizeConfig,
   safeBoleta,
   saveBoleta,
+  annulBoleta,
 };
 
 export const handler = event => handlePost(event, body => dispatchBoletas(getAdminDb(), body, {

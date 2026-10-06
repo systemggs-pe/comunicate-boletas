@@ -1,3 +1,4 @@
+import {createPosReceiptConfirmation, subscribePosDraftInvalidation} from './posReceiptDraft.js';
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import {Search, Edit, Printer, ScanBarcode, FileText} from '../../components/Icons.jsx';
 import {buscarBoletasHistorial, buscarVentasBoleta, consultarReniecDni, guardarBoletaExtranjera, listarBoletas} from '../../services/functionsClient.js';
@@ -208,14 +209,14 @@ const formDesdeBoleta = boleta => {
   };
 };
 
-export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
-  const [modo, setModo] = useState(getModoFromUrl);
-  const [fechaHora, setFechaHora] = useState(toLocalDatetimeValueBoleta(new Date()));
+export function BoletaExtranjera({boletaEmisoresConfig, showToast, posDraft = null}) {
+  const [modo, setModo] = useState(() => posDraft ? 'nueva' : getModoFromUrl());
+  const [fechaHora, setFechaHora] = useState(() => posDraft ? '' : toLocalDatetimeValueBoleta(new Date()));
   const [modalBoleta, setModalBoleta] = useState(null);
   const [boletaExistentePrompt, setBoletaExistentePrompt] = useState(null);
   const [boletaEnEdicion, setBoletaEnEdicion] = useState(null);
   const [historialBoletas, setHistorialBoletas] = useState([]);
-  const [cargandoHistorial, setCargandoHistorial] = useState(true);
+  const [cargandoHistorial, setCargandoHistorial] = useState(!posDraft);
   const [cargandoMas, setCargandoMas] = useState(false);
   const [cursorHistorial, setCursorHistorial] = useState('');
   const [hayMasHistorial, setHayMasHistorial] = useState(false);
@@ -289,16 +290,17 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    cargarHistorial();
-  }, [cargarHistorial]);
+    if (!posDraft) cargarHistorial();
+  }, [cargarHistorial, posDraft]);
 
   useEffect(() => {
-    const onPopState = () => setModo(getModoFromUrl());
+    const onPopState = () => setModo(posDraft ? 'nueva' : getModoFromUrl());
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, []);
+  }, [posDraft]);
 
   const cambiarModo = (nextMode, focus = false) => {
+    if (posDraft && nextMode !== 'nueva') return;
     setModo(nextMode);
     writeModoToUrl(nextMode);
     if (focus) window.requestAnimationFrame(() => document.getElementById(`boleta-tab-${nextMode}`)?.focus());
@@ -390,6 +392,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
   };
 
   const abrirSelectorFormato = (boletaData, opciones = {}) => {
+    setPosConfirmed(false);
     setModalBoleta({
       ...boletaData,
       historialId: opciones.historialId || null,
@@ -423,6 +426,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
   };
 
   const imprimirBoleta = async (data, formato) => {
+    if (posInvalidated) {showToast('Los datos cambiaron en POS. Prepara un borrador nuevo.', 'error'); return;}
     if (imprimiendoBoletaRef.current) return;
     imprimiendoBoletaRef.current = true;
     setImprimiendoBoleta(true);
@@ -446,12 +450,20 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
 
     try {
       if (data.guardarHistorial) {
-        const saved = await guardarBoletaExtranjera({
+        const savePayload = {
           action: data.historialId ? 'update' : 'save',
           historialId: data.historialId || '',
           formato,
           boletaData: limpiarParaFirestore(boletaData),
-        });
+        };
+        const saved = posDraft && !data.historialId
+          ? await posConfirmation.confirm(savePayload, posDraft, posConfirmed)
+          : await guardarBoletaExtranjera(savePayload);
+        if (saved.reused) {
+          setModalBoleta(null);
+          showToast('Se encontró un comprobante creado recientemente. Se utilizará ese comprobante. Vuelve al POS para comprobarlo.', 'success');
+          return;
+        }
         boletaData.nBoleta = saved.boleta?.nBoleta || boletaData.nBoleta;
         boletaData.emisor = {
           ...boletaData.emisor,
@@ -483,12 +495,16 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       else await pdfModule.generarBoletaExtranjera7(boletaData);
       showToast(data.guardarHistorial ? (data.historialId ? 'Boleta actualizada e impresa' : 'Boleta guardada e impresa') : 'Boleta reimpresa', 'success');
     } catch (error) {
-      console.error(error);
+      if (posDraft) console.warn(JSON.stringify({event: 'apple.receipt.confirm', result: 'error', code: ['BOLETA_EQUIPO_YA_EXISTE', 'BOLETA_ANULADA', 'BOLETA_LEGACY', 'BOLETA_EXISTENTE_INVALIDA', 'BORRADOR_POS_EXPIRADO', 'BORRADOR_POS_CAMBIO', 'CONFIRMACION_REQUERIDA'].includes(error.message) ? error.message : 'SERVICE_ERROR'}));
+      else console.error(error);
       if (error.message === 'BOLETA_EQUIPO_YA_EXISTE') {
         const duplicateId = error.payload?.details?.boletaId || error.payload?.boletaId || '';
         const boleta = historialBoletas.find(item => item.id === duplicateId);
         if (boleta) setBoletaExistentePrompt({boleta, draft: boletaData, opciones: {}});
         showToast('Ese equipo ya tiene una boleta de venta', 'error');
+      } else if (['BOLETA_ANULADA', 'BOLETA_LEGACY', 'BOLETA_EXISTENTE_INVALIDA', 'BORRADOR_POS_EXPIRADO', 'CONFIRMACION_REQUERIDA', 'BORRADOR_POS_CAMBIO'].includes(error.message)) {
+        const messages = {BORRADOR_POS_CAMBIO: 'Los datos cambiaron en POS. Prepara un borrador nuevo.', BOLETA_ANULADA: 'El comprobante encontrado está anulado.', BOLETA_LEGACY: 'El comprobante necesita ser actualizado antes de utilizarse.', BOLETA_EXISTENTE_INVALIDA: 'El comprobante existente necesita revisión en el repositorio.', BORRADOR_POS_EXPIRADO: 'El borrador expiró. Vuelve al registro y prepara uno nuevo.', CONFIRMACION_REQUERIDA: 'Revisa y confirma antes de generar.'};
+        showToast(messages[error.message], 'error');
       } else {
         showToast('No se pudo guardar o imprimir la boleta', 'error');
       }
@@ -507,12 +523,17 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
   // Modo nueva boleta manual
   const [mostrarEscanerBoleta, setMostrarEscanerBoleta] = useState(false);
   const [escaneoBoletaProcesando, setEscaneoBoletaProcesando] = useState(false);
-  const [form, setForm] = useState({...emptyForm});
+  const [form, setForm] = useState(() => posDraft ? {...emptyForm, ...posDraft.fields} : {...emptyForm});
+  const [posConfirmed, setPosConfirmed] = useState(false);
+  const [posInvalidated, setPosInvalidated] = useState(Boolean(posDraft?.revoked));
+  const [posConfirmation] = useState(() => createPosReceiptConfirmation(guardarBoletaExtranjera));
+  useEffect(() => subscribePosDraftInvalidation(window, posDraft, () => {posConfirmation.revoke(); setPosInvalidated(true); setModalBoleta(null);}), [posDraft, posConfirmation]);
   const [buscandoReniecBoleta, setBuscandoReniecBoleta] = useState(false);
   const [formErrors, setFormErrors] = useState({});
 
   const handleFormChange = (e) => {
     const { name, value } = e.target;
+    if (posDraft?.automatic.includes(name)) return;
     let v = value;
     if (['imei1','imei2'].includes(name)) v = v.replace(/\D/g,'').slice(0,15);
     if (name === 'rut') v = normalizarDocumentoBoleta(v);
@@ -526,7 +547,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
   };
 
   useEffect(() => {
-    if (form.tipoDocumento !== 'DNI' || !/^\d{8}$/.test(form.rut)) return;
+    if (posDraft || form.tipoDocumento !== 'DNI' || !/^\d{8}$/.test(form.rut)) return;
 
     let activo = true;
     const buscarNombre = async () => {
@@ -559,9 +580,10 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
 
     buscarNombre();
     return () => { activo = false; };
-  }, [form.rut, form.tipoDocumento, showToast]);
+  }, [form.rut, form.tipoDocumento, showToast, posDraft]);
 
   const onEscanerBoleta = (datos) => {
+    if (posDraft) {showToast('Corrige los datos precargados desde el registro POS.', 'error'); return;}
     setMostrarEscanerBoleta(false);
     setEscaneoBoletaProcesando(false);
     setForm(prev => ({
@@ -591,6 +613,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
 
   const emitirNueva = () => {
     const errors = {};
+    if (posDraft && (!fechaHora || Number.isNaN(Date.parse(fechaHora)))) errors.fechaHora = 'Completa la fecha de la venta.';
     if (!form.nombre.trim()) errors.nombre = 'Ingresa el nombre del cliente.';
     if (form.tipoDocumento === 'DNI' && !/^\d{8}$/.test(form.rut)) {
       errors.rut = 'Ingresa un DNI de 8 dígitos.';
@@ -623,6 +646,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
 
   const fieldAccessibility = field => ({
     id: `manual-${field}`,
+    readOnly: Boolean(posDraft?.automatic.includes(field)),
     'aria-invalid': Boolean(formErrors[field]),
     'aria-describedby': formErrors[field] ? `manual-${field}-error` : undefined,
   });
@@ -660,25 +684,35 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
 
   return (
     <div className="saas-boleta-page space-y-4">
+      {posDraft && <div className="ui-status" role="status"><div>
+        <p className="font-semibold">{posInvalidated ? 'Borrador invalidado: vuelve al registro POS' : 'Borrador preparado desde Registro Apple'}</p>
+        <p className="text-sm">No se ha emitido una boleta. Los datos precargados se corrigen desde POS; completa precio de venta, fecha y formato. Después de generar, vuelve al registro y pulsa Comprobar.</p>
+      </div></div>}
       {/* Selección del tipo de boleta */}
       {modalBoleta && (
         <AccessibleDialog
           title="Elige el formato de impresión"
-          description="Selecciona el formato que corresponde a tu impresora."
+          description={posDraft ? 'Revisa los datos y confirma antes de generar. Se comprobará de nuevo si ya existe una boleta.' : 'Selecciona el formato que corresponde a tu impresora.'}
           onClose={() => !imprimiendoBoleta && setModalBoleta(null)}
           panelClassName="format-dialog"
         >
+          {posDraft && modalBoleta.guardarHistorial && (
+            <label className="flex items-start gap-3 mb-4 text-sm">
+              <input type="checkbox" checked={posConfirmed} onChange={e => setPosConfirmed(e.target.checked)} className="mt-1 h-5 w-5 shrink-0" />
+              <span>He revisado cliente, IMEI, precio y fecha. Confirmo generar esta boleta.</span>
+            </label>
+          )}
           <div className="format-options" aria-busy={imprimiendoBoleta}>
             {Object.entries(FORMATOS_BOLETA).map(([format, formatInfo], index) => (
               <button
                 key={format}
                 type="button"
-                disabled={imprimiendoBoleta}
+                disabled={posInvalidated || imprimiendoBoleta || (Boolean(posDraft) && !posConfirmed)}
                 onClick={() => imprimirBoleta(modalBoleta, Number(format))}
                 className="format-option"
                 data-dialog-autofocus={index === 0 ? '' : undefined}
               >
-                <span>{formatInfo.label}</span>
+                <span>{posDraft ? `Confirmar y generar · ${formatInfo.label}` : formatInfo.label}</span>
                 <small>{formatInfo.description}</small>
               </button>
             ))}
@@ -720,7 +754,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
       <div className="boleta-workspace">
         <div className="boleta-utility-row">
           <div className="saas-segmented" role="tablist" aria-label="Flujo de boletas">
-            {MODOS.map(item => (
+            {MODOS.filter(item => !posDraft || item.id === 'nueva').map(item => (
               <button
                 key={item.id}
                 id={`boleta-tab-${item.id}`}
@@ -737,7 +771,8 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
           </div>
           {modo !== 'historial' && (
             <label className="boleta-date-field" htmlFor="boleta-fecha">Fecha de emisión
-              <input id="boleta-fecha" name="fechaHora" type="datetime-local" value={fechaHora} onChange={e => setFechaHora(e.target.value)} autoComplete="off"/>
+              <input aria-invalid={Boolean(formErrors.fechaHora)} id="boleta-fecha" name="fechaHora" type="datetime-local" value={fechaHora} onChange={e => setFechaHora(e.target.value)} autoComplete="off"/>
+              {formErrors.fechaHora && <p role="alert" className="field-error">{formErrors.fechaHora}</p>}
             </label>
           )}
         </div>
@@ -843,7 +878,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
               <div className="ui-field"><label className="ui-field-label" htmlFor="manual-nombre">Nombre *</label><input {...fieldAccessibility('nombre')} name="nombre" value={form.nombre} onChange={handleFormChange} placeholder="Nombre completo…" autoComplete="name" required/>{fieldError('nombre')}</div>
               <div className="ui-field">
                 <label className="ui-field-label" htmlFor="manual-tipoDocumento">Tipo de documento *</label>
-                <select id="manual-tipoDocumento" name="tipoDocumento" value={form.tipoDocumento} onChange={handleFormChange} required>
+                <select disabled={Boolean(posDraft)} id="manual-tipoDocumento" name="tipoDocumento" value={form.tipoDocumento} onChange={handleFormChange} required>
                   {TIPOS_DOCUMENTO.map(tipo => <option key={tipo} value={tipo}>{tipo}</option>)}
                 </select>
               </div>
@@ -909,7 +944,7 @@ export function BoletaExtranjera({boletaEmisoresConfig, showToast}) {
             </div>
 
             <div className="boleta-form-actions">
-              <button type="button" onClick={() => { setFormErrors({}); boletaEnEdicion ? cancelarEdicionBoleta() : setForm({...emptyForm}); }} className="saas-secondary">
+              <button type="button" onClick={() => { setFormErrors({}); boletaEnEdicion ? cancelarEdicionBoleta() : setForm({...emptyForm, ...(posDraft?.fields || {})}); }} className="saas-secondary">
                 {boletaEnEdicion ? 'Cancelar edición' : 'Limpiar'}
               </button>
               <button type="button" onClick={emitirNueva} className="saas-primary flex-1">

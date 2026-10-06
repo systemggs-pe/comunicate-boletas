@@ -1,3 +1,5 @@
+import {receiptFingerprint} from '../functions/_receiptFingerprint.mjs';
+import {handlePost} from '../functions/_shared.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -644,4 +646,120 @@ test('format 1 uses the 80 mm SII receipt layout with a real PDF417 stamp', asyn
   assert.match(format1, /detailField\('IMEI'/);
   assert.match(format1, /Timbre Electrónico SII/);
   assert.doesNotMatch(format1, /CODE128/);
+});
+
+
+test('new receipts are active; edits preserve active, annulled and legacy states', async () => {
+  for (const state of ['ACTIVA', 'ANULADA', undefined]) {
+    const db = new FakeDb(); const imei = '123456789012345';
+    const saved = await __test.saveBoleta(db, validPayload(imei));
+    const ref = db.collection('artifacts').doc('comunicate-pos').collection('users').doc('shared').collection('boletasExtranjeras').doc(saved.id);
+    assert.equal(db.documents.get(ref.path).estado, 'ACTIVA');
+    const stored = db.documents.get(ref.path); if (state === undefined) delete stored.estado; else stored.estado = state;
+    const updated = await __test.saveBoleta(db, {...validPayload(imei), action: 'update', historialId: saved.id});
+    assert.equal(updated.boleta.estado, state ?? null);
+    assert.equal(db.documents.get(ref.path).estado, state);
+    assert.match(updated.boleta.receiptFingerprint, /^[a-f0-9]{64}$/);
+  }
+});
+
+test('annul operation preserves document and content, updates state and timestamp', async () => {
+  const id = 'old-receipt', path = `${basePath}/boletasExtranjeras/${id}`;
+  const old = {estado: 'ACTIVA', updatedAt: new Date('2026-01-01'), nBoleta: 1042, boletaData: {cliente: {nombre: 'PRUEBA'}}};
+  const db = new FakeDb({[path]: old}); const beforeHash = __test.safeBoleta(id, old).receiptFingerprint;
+  const result = await dispatchBoletas(db, {action: 'annul', historialId: id});
+  const after = db.documents.get(path);
+  assert.equal(result.estado, 'ANULADA'); assert.equal(after.estado, 'ANULADA');
+  assert.deepEqual(after.boletaData, old.boletaData); assert.equal(after.nBoleta, old.nBoleta);
+  assert.notDeepEqual(after.updatedAt, old.updatedAt);
+  assert.notEqual(__test.safeBoleta(id, after).receiptFingerprint, beforeHash);
+  await assert.rejects(dispatchBoletas(db, {action: 'annul', historialId: 'missing'}), {status: 404});
+});
+
+test('legacy receipts remain readable but are not reported active', () => {
+  const legacy = __test.safeBoleta('legacy', {nBoleta: 1001, boletaData: {}});
+  assert.equal(legacy.estado, null); assert.match(legacy.receiptFingerprint, /^[a-f0-9]{64}$/);
+});
+
+
+test('receipt fingerprint contract v1 matches the shared golden vector', () => {
+  const input = {id: 'contract-fixture', estado: 'ACTIVA', nBoleta: 1042, fechaHora: '2026-10-01T12:00:00.000Z',
+    boletaData: {cliente: {nombre: 'ANA', dni: '12345678'}, ventas: [{imeiEquipo: '490154203237518', marcaEquipo: 'APPLE', precio: 1200}]}};
+  assert.equal(receiptFingerprint(input), 'ae76e8f1b61612a20f361403e959d81a6897b4016b55087bb7689a1627e18aa5');
+});
+
+
+test('annul requires an authorized Firebase user; API key alone is insufficient', async () => {
+  const previousKey = process.env.BOLETAS_INTEGRATION_API_KEY;
+  const previousFirebaseKey = process.env.FIREBASE_API_KEY;
+  const previousEmails = process.env.ALLOWED_EMAILS;
+  const previousFetch = globalThis.fetch;
+  process.env.BOLETAS_INTEGRATION_API_KEY = 'fixture-integration-key';
+  process.env.FIREBASE_API_KEY = 'fixture-auth-key';
+  process.env.ALLOWED_EMAILS = 'fixture@example.test';
+  let authCalls = 0, callbackCalls = 0;
+  globalThis.fetch = async () => {authCalls++; return new Response(JSON.stringify({users: [{localId: 'fixture-user', emailVerified: true, email: 'fixture@example.test'}]}));};
+  try {
+    const id = 'receipt-to-annul', path = `${basePath}/boletasExtranjeras/${id}`;
+    const db = new FakeDb({[path]: {estado: 'ACTIVA'}});
+    const callback = body => {callbackCalls++; return dispatchBoletas(db, body);};
+    const event = headers => ({httpMethod: 'POST', headers, body: JSON.stringify({action: 'annul', historialId: id})});
+    const denied = await handlePost(event({'x-api-key': 'fixture-integration-key'}), callback);
+    assert.equal(denied.statusCode, 401); assert.equal(callbackCalls, 0); assert.equal(authCalls, 0);
+    const unauthenticated = await handlePost(event({}), callback);
+    assert.equal(unauthenticated.statusCode, 401); assert.equal(callbackCalls, 0);
+    const allowed = await handlePost(event({authorization: 'Bearer fixture-token'}), callback);
+    assert.equal(allowed.statusCode, 200); assert.equal(callbackCalls, 1); assert.equal(authCalls, 1);
+    assert.equal(db.documents.get(path).estado, 'ANULADA');
+  } finally {
+    globalThis.fetch = previousFetch;
+    for (const [name, previous] of [['BOLETAS_INTEGRATION_API_KEY', previousKey], ['FIREBASE_API_KEY', previousFirebaseKey], ['ALLOWED_EMAILS', previousEmails]]) {
+      if (previous === undefined) delete process.env[name]; else process.env[name] = previous;
+    }
+  }
+});
+
+
+test('legacy malformed optional content does not break safe receipt reading', () => {
+  for (const boletaData of [{ventas: 'old-format'}, {ventas: [], equiposMap: {'490154203237518': null}}]) {
+    const result = __test.safeBoleta('legacy', {boletaData});
+    assert.equal(result.estado, null); assert.match(result.receiptFingerprint, /^[a-f0-9]{64}$/);
+  }
+});
+
+
+test('automation confirm atomically reuses a receipt created after initial not-found', async () => {
+  const db = new FakeDb(); const imei = '490154203237518';
+  const existing = await __test.saveBoleta(db, validPayload(imei));
+  const before = JSON.stringify([...db.documents]);
+  const result = await __test.saveBoleta(db, {...validPayload(imei), reuseExisting: true});
+  assert.equal(result.reused, true); assert.equal(result.id, existing.id);
+  assert.equal(JSON.stringify([...db.documents]), before); assert.match(result.boleta.receiptFingerprint, /^[a-f0-9]{64}$/);
+});
+
+test('concurrent automation confirms create one receipt and reuse it without new numbers', async () => {
+  const db = new FakeDb(); const imei = '490154203237518';
+  const results = await Promise.all(Array.from({length: 3}, () => __test.saveBoleta(db, {...validPayload(imei), reuseExisting: true})));
+  assert.equal(new Set(results.map(result => result.id)).size, 1);
+  assert.equal(results.filter(result => result.reused).length, 2);
+  assert.equal([...db.documents.keys()].filter(path => path.startsWith(`${basePath}/boletasExtranjeras/`)).length, 1);
+});
+
+for (const [estado, error] of [['ANULADA', 'BOLETA_ANULADA'], [undefined, 'BOLETA_LEGACY']]) {
+  test(`automation never replaces an existing ${estado} receipt`, async () => {
+    const db = new FakeDb(); const imei = '490154203237518'; const saved = await __test.saveBoleta(db, validPayload(imei));
+    const path = `${basePath}/boletasExtranjeras/${saved.id}`;
+    if (estado === undefined) delete db.documents.get(path).estado; else db.documents.get(path).estado = estado;
+    const before = JSON.stringify([...db.documents]);
+    await assert.rejects(__test.saveBoleta(db, {...validPayload(imei), reuseExisting: true}), {message: error, status: 409});
+    assert.equal(JSON.stringify([...db.documents]), before);
+  });
+}
+
+test('secondary IMEI locks reuse the authoritative owner instead of creating a second receipt', async () => {
+  const db = new FakeDb(); const primary = '490154203237518', secondary = '356938035643809';
+  const input = validPayload(primary); input.boletaData.ventas[0].imei2Equipo = secondary;
+  const saved = await __test.saveBoleta(db, input); const before = JSON.stringify([...db.documents]);
+  const reused = await __test.saveBoleta(db, {...validPayload(secondary), reuseExisting: true});
+  assert.equal(reused.id, saved.id); assert.equal(reused.reused, true); assert.equal(JSON.stringify([...db.documents]), before);
 });

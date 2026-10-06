@@ -1,3 +1,4 @@
+import {incomingPosReceiptDraft} from './features/boletas/posReceiptDraft.js';
 import React, {lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useState} from 'react';
 import {LogOut, Moon, Sun} from './components/Icons.jsx';
 import {onAuthStateChanged, signOut} from 'firebase/auth';
@@ -160,7 +161,7 @@ export default function App() {
         <main className="app-main" id="main-content" tabIndex={-1}>
           <Suspense fallback={<div className="saas-empty py-12" role="status">Cargando módulo…</div>}>
             {view === 'boletas'
-              ? <BoletaExtranjera boletaEmisoresConfig={issuerConfig} showToast={showToast}/>
+              ? <BoletaExtranjera posDraft={incomingPosReceiptDraft} boletaEmisoresConfig={issuerConfig} showToast={showToast}/>
               : issuerConfigLoading
                 ? <div className="saas-empty py-12" role="status">Cargando emisores…</div>
                 : <EmisoresSettings config={issuerConfig} onSave={saveConfig} onDirtyChange={setSettingsDirty}/>
