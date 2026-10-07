@@ -689,7 +689,7 @@ test('receipt fingerprint contract v1 matches the shared golden vector', () => {
 });
 
 
-test('annul requires an authorized Firebase user; API key alone is insufficient', async () => {
+test('annul requires an authorized user; integration key cannot annul', async () => {
   const previousKey = process.env.BOLETAS_INTEGRATION_API_KEY;
   const previousFirebaseKey = process.env.FIREBASE_API_KEY;
   const previousEmails = process.env.ALLOWED_EMAILS;
@@ -705,7 +705,7 @@ test('annul requires an authorized Firebase user; API key alone is insufficient'
     const callback = body => {callbackCalls++; return dispatchBoletas(db, body);};
     const event = headers => ({httpMethod: 'POST', headers, body: JSON.stringify({action: 'annul', historialId: id})});
     const denied = await handlePost(event({'x-api-key': 'fixture-integration-key'}), callback);
-    assert.equal(denied.statusCode, 401); assert.equal(callbackCalls, 0); assert.equal(authCalls, 0);
+    assert.equal(denied.statusCode, 403); assert.equal(callbackCalls, 0); assert.equal(authCalls, 0);
     const unauthenticated = await handlePost(event({}), callback);
     assert.equal(unauthenticated.statusCode, 401); assert.equal(callbackCalls, 0);
     const allowed = await handlePost(event({authorization: 'Bearer fixture-token'}), callback);

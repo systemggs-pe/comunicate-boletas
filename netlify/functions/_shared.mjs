@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {randomUUID, timingSafeEqual} from 'node:crypto';
 
 const allowedOrigins = [
   'http://localhost:5174',
@@ -38,7 +38,7 @@ export function corsHeaders(event) {
   const origin = event.headers?.origin || event.headers?.Origin || '';
   const headers = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Request-Id',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key, X-Request-Id',
     'Access-Control-Expose-Headers': 'X-Request-Id',
   };
   if (allowedOrigins.includes(origin)) {
@@ -46,6 +46,22 @@ export function corsHeaders(event) {
     headers.Vary = 'Origin';
   }
   return headers;
+}
+
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left || ''), 'utf8');
+  const b = Buffer.from(String(right || ''), 'utf8');
+  return a.length > 0 && a.length === b.length && timingSafeEqual(a, b);
+}
+
+function requireIntegrationKey(event, body) {
+  const configured = String(process.env.BOLETAS_INTEGRATION_API_KEY || process.env.APPLE_RECEIPTS_API_KEY || '').trim();
+  const provided = String(event.headers?.['x-api-key'] || event.headers?.['X-API-Key'] || '').trim();
+  if (!safeEqual(provided, configured)) return null;
+  if (String(body?.action || '').trim() !== 'searchHistory') {
+    throw Object.assign(new Error('No autorizado'), {status: 403});
+  }
+  return {uid: 'server-integration', email: 'server-integration@comunicate.local', integration: true};
 }
 
 export function json(statusCode, body, headers = {}) {
@@ -88,9 +104,10 @@ export async function handlePost(event, callback, options = {}) {
   if (event.httpMethod !== 'POST') return json(405, {error: 'Metodo no permitido', requestId}, headers);
 
   try {
-    const user = await requireFirebaseUser(event);
+    const body = parseBody(event);
+    const user = requireIntegrationKey(event, body) || await requireFirebaseUser(event);
     enforceRequestRateLimit(`${options.name || 'api'}:${user.uid}`, options.rateLimit);
-    const result = await callback(parseBody(event), user, {requestId, ip: clientIp(event)});
+    const result = await callback(body, user, {requestId, ip: clientIp(event)});
     return json(200, result, headers);
   } catch (error) {
     return json(error.status || 500, {
